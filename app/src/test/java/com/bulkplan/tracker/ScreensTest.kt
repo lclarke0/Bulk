@@ -26,7 +26,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.io.FileOutputStream
 
-/** Renders each main screen with sample data to app/build/screens/*.png so the design can be checked without a phone. */
+/** Renders each main screen with sample data to app/build/screens so the design can be checked without a phone. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], application = Application::class, qualifiers = "w400dp-h2000dp-xhdpi")
