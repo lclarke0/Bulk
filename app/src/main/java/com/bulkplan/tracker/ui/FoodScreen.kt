@@ -26,8 +26,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -144,13 +144,13 @@ fun FoodScreen() {
     LazyColumn(contentPadding = PaddingValues(16.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { date = PlanLogic.addD(date, -1) }) { Icon(Icons.Filled.KeyboardArrowLeft, "Previous day") }
+                IconButton(onClick = { date = PlanLogic.addD(date, -1) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous day") }
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(PlanLogic.fmtD(date), style = H2)
                     Muted(if (date == PlanLogic.today()) "Today" else "${-PlanLogic.diffD(date, PlanLogic.today())} days ago")
                 }
                 IconButton(onClick = { if (date < PlanLogic.today()) date = PlanLogic.addD(date, 1) }, enabled = date < PlanLogic.today()) {
-                    Icon(Icons.Filled.KeyboardArrowRight, "Next day")
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next day")
                 }
             }
         }

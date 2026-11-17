@@ -129,6 +129,13 @@ object Garmin {
         return sb.toString()
     }
 
+    /** Parses one endpoint's reply into date → values; used by sync and by tests. */
+    internal fun parse(text: String): Map<String, Map<String, Double>> {
+        val acc = mutableMapOf<String, MutableMap<String, Double>>()
+        collect(Repo.json.parseToJsonElement(text), acc)
+        return acc
+    }
+
     // ---------- tolerant parsing: Garmin's field names vary between services ----------
     private val DATE_KEYS = listOf("calendarDate", "summaryDate", "date", "sleepDate", "calendar_date", "measurementDate")
     private val STEPS = listOf("totalSteps", "steps", "stepCount", "totalStepCount", "value")
