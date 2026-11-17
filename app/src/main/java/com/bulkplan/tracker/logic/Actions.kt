@@ -31,10 +31,10 @@ object Actions {
                 val src = "plan:${item.id}"
                 foods = foods.filterNot { it.source == src }
                 if (on) foods = foods + FoodEntry(
-                    id = newId(), name = item.title,
+                    id = newId(), name = item.detail.removeSuffix(".").replaceFirstChar { it.uppercase() },
                     kcal = item.kcal.toDouble(), protein = (item.protein ?: 0).toDouble(),
                     meal = slotFor(item.time), source = src, at = Instant.now().toString(),
-                    detail = item.detail.removeSuffix("."),
+                    detail = "From your plan · ${item.protein ?: 0} g protein",
                 )
             }
             l.copy(checks = checks, foods = foods)

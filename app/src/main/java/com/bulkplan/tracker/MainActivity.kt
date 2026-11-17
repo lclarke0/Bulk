@@ -173,10 +173,7 @@ private fun BottomBar(tab: String, onPick: (String) -> Unit) {
                     if (tb.key != "today") {
                         Icon(tb.icon, tb.label, tint = if (sel) C.Blue else C.Muted, modifier = Modifier.size(26.dp))
                         Text(tb.label, fontSize = 12.sp, color = if (sel) C.Blue else C.Muted)
-                    } else {
-                        Spacer(Modifier.height(30.dp))
-                        Text(tb.label, fontSize = 12.sp, color = if (sel) C.Blue else C.Muted)
-                    }
+                    } else Spacer(Modifier.height(30.dp))
                 }
             }
         }

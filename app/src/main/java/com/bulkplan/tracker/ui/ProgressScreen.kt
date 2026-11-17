@@ -85,7 +85,7 @@ fun ProgressScreen() {
         }
         item {
             Section("Weight vs target pace") {
-                Muted("Dots: daily · red line: 7-day average · dashes: target pace")
+                Muted("Dots: daily · blue line: 7-day average · dashes: target pace")
                 WeightChart(plan, logs)
             }
         }
@@ -122,6 +122,11 @@ fun ProgressScreen() {
         item {
             Section("Last 14 days") {
                 Muted("Tap a day to fix its numbers.")
+                Row {
+                    listOf("Day" to 1.4f, "Weight" to 1f, "Calories" to 1f, "Protein" to 1f, "Sleep" to .8f).forEach { (h, wt) ->
+                        Text(h, modifier = Modifier.weight(wt), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 (0..13).map { addD(t, -it.toLong()) }.forEach { d ->
                     val g = logs[d]
                     Row(Modifier.fillMaxWidth().clickable { editDay = d }.padding(vertical = 6.dp)) {
