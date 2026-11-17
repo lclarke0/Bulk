@@ -28,12 +28,13 @@ jobs:
         continue-on-error: true
         run: ./gradlew :app:testDebugUnitTest --tests 'com.bulkplan.tracker.ScreensTest' --stacktrace
 
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: screens
-          path: app/build/screens/
-          if-no-files-found: ignore
+      - name: Publish screen previews to the "screens" branch
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/screens && cp app/build/screens/*.png /tmp/screens/
+          cd /tmp/screens && git init -q -b screens && git add . \
+            && git -c user.name="ci" -c user.email="ci@users.noreply.github.com" commit -qm "Screens for ${{ github.sha }}" \
+            && git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screens
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk BulkPlan.apk
