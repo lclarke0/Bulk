@@ -31,9 +31,10 @@ object Actions {
                 val src = "plan:${item.id}"
                 foods = foods.filterNot { it.source == src }
                 if (on) foods = foods + FoodEntry(
-                    id = newId(), name = item.title + ": " + item.detail.removeSuffix("."),
+                    id = newId(), name = item.title,
                     kcal = item.kcal.toDouble(), protein = (item.protein ?: 0).toDouble(),
                     meal = slotFor(item.time), source = src, at = Instant.now().toString(),
+                    detail = item.detail.removeSuffix("."),
                 )
             }
             l.copy(checks = checks, foods = foods)
@@ -54,6 +55,14 @@ object Actions {
         if (s.savedFoods.any { it.name.equals(f.name, true) }) s
         else s.copy(savedFoods = s.savedFoods + SavedFood(newId(), f.name, f.kcal, f.protein, f.carbs, f.fat, 1))
     }
+
+    fun moveFood(date: String, id: String, meal: String) =
+        Repo.updateLog(date) { d -> d.copy(foods = d.foods.map { if (it.id == id) it.copy(meal = meal) else it }) }
+
+    /** Planned calories per meal slot for a day, used as each meal card's budget. */
+    fun mealBudgets(plan: com.bulkplan.tracker.data.Plan, date: String): Map<String, Int> =
+        PlanLogic.itemsFor(plan, date).filter { it.kind == "meal" && it.kcal != null }
+            .groupBy { slotFor(it.time) }.mapValues { (_, l) -> l.sumOf { it.kcal ?: 0 } }
 
     fun removeFood(date: String, id: String) {
         val l = Repo.log(date)

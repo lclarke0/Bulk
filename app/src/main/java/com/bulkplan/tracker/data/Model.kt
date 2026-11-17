@@ -105,6 +105,8 @@ data class FoodEntry(
     /** plan:<scheduleId>, barcode, search, claude, label, quick, saved */
     val source: String = "quick",
     val at: String = "",
+    /** Portion or note shown under the name, e.g. "1 bowl, 1 banana". */
+    val detail: String = "",
 )
 
 @Serializable
@@ -187,6 +189,7 @@ data class ChangeLogEntry(
 
 @Serializable
 data class Settings(
+    val name: String = "",
     val alerts: Boolean = true,
     val claudeKey: String = "",
     val claudeModel: String = "claude-sonnet-5-5",

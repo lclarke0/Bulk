@@ -85,6 +85,7 @@ fun SettingsScreen(onClose: () -> Unit) {
     var steps by remember { mutableStateOf(plan.targets.steps.toString()) }
     val weak = remember { mutableStateListOf<String>().apply { addAll(plan.weakMuscles) } }
 
+    var name by remember { mutableStateOf(st.name) }
     var claudeKey by remember { mutableStateOf(st.claudeKey) }
     var model by remember { mutableStateOf(st.claudeModel) }
     var garminKey by remember { mutableStateOf(st.garminKey) }
@@ -107,7 +108,7 @@ fun SettingsScreen(onClose: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = C.Bg,
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -117,6 +118,11 @@ fun SettingsScreen(onClose: () -> Unit) {
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp)) {
+            Section("You") {
+                Field(name, { name = it }, "Your first name (for the coach’s greeting)", Modifier.fillMaxWidth())
+                Button(onClick = { Repo.update { it.copy(settings = it.settings.copy(name = name.trim())) }; toast("Saved") }) { Text("Save") }
+            }
+
             Section("Plan") {
                 val num = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 OutlinedTextField(start, { start = it }, label = { Text("Start date (YYYY-MM-DD, a Monday)") }, singleLine = true, modifier = Modifier.fillMaxWidth())

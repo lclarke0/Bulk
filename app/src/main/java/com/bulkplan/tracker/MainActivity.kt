@@ -11,6 +11,27 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import com.bulkplan.tracker.ui.C
+import com.bulkplan.tracker.ui.Ico
+import com.bulkplan.tracker.ui.PageHeader
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -84,14 +105,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Tab(val key: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+private data class Tab(val key: String, val label: String, val title: String, val icon: ImageVector)
 
 private val TABS = listOf(
-    Tab("today", "Today", Icons.Filled.Check),
-    Tab("food", "Food", Icons.Filled.ShoppingCart),
-    Tab("workout", "Workout", Icons.Filled.Star),
-    Tab("progress", "Progress", Icons.Filled.DateRange),
-    Tab("coach", "Coach", Icons.Filled.Favorite),
+    Tab("food", "Food", "Nutrition Tracker", Ico.Fork),
+    Tab("progress", "Progress", "Progress", Ico.Chart),
+    Tab("today", "Today", "Today’s Schedule", Ico.Calendar),
+    Tab("workout", "Workout", "Workout", Ico.Dumbbell),
+    Tab("coach", "Coach", "AI Coach", Ico.Chat),
 )
 
 @Composable
@@ -110,36 +131,17 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
             return@CompositionLocalProvider
         }
         val t = PlanLogic.today(); val w = PlanLogic.weekOf(state.plan, t); val b = PlanLogic.blockFor(state.plan, w)
-        val sub = when {
-            w < 1 -> "Starts ${PlanLogic.fmtD(state.plan.startDate)} · ${PlanLogic.diffD(t, state.plan.startDate)} days"
+        val sub = PlanLogic.fmtD(t) + " · " + when {
+            w < 1 -> "Plan starts ${PlanLogic.fmtD(state.plan.startDate)}"
             w > state.plan.weeks -> "Plan complete"
             else -> "Week $w of ${state.plan.weeks}" + (b?.let { " · ${it.name}" } ?: "")
         }
+        val current = TABS.first { it.key == tab }
         Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = C.Bg,
             snackbarHost = { SnackbarHost(snack) },
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(TABS.first { it.key == tab }.label, fontSize = 26.sp)
-                            Text("${PlanLogic.fmtD(t)} · $sub", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                    actions = { IconButton(onClick = { settings = true }) { Icon(Icons.Filled.Settings, contentDescription = "Settings") } },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                )
-            },
-            bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    TABS.forEach { tb ->
-                        NavigationBarItem(
-                            selected = tab == tb.key, onClick = { tab = tb.key },
-                            icon = { Icon(tb.icon, contentDescription = null) }, label = { Text(tb.label) },
-                        )
-                    }
-                }
-            },
+            topBar = { Box(Modifier.statusBarsPadding()) { PageHeader(current.title, current.icon, sub) { settings = true } } },
+            bottomBar = { BottomBar(tab) { tab = it } },
         ) { pad ->
             Box(Modifier.padding(pad)) {
                 when (tab) {
@@ -147,9 +149,43 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
                     "food" -> FoodScreen()
                     "workout" -> WorkoutScreen()
                     "progress" -> ProgressScreen()
-                    "coach" -> CoachScreen(onOpenSettings = { settings = true })
+                    "coach" -> CoachScreen(onOpenSettings = { settings = true }, onGo = { tab = it })
                 }
             }
         }
+    }
+}
+
+/** Bottom bar with a raised round button in the middle for Today, as in the mockups. */
+@Composable
+private fun BottomBar(tab: String, onPick: (String) -> Unit) {
+    Box(Modifier.fillMaxWidth().background(C.Bg)) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 18.dp).background(C.Card).navigationBarsPadding().height(64.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TABS.forEach { tb ->
+                val sel = tb.key == tab
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().clickable { onPick(tb.key) },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    if (tb.key != "today") {
+                        Icon(tb.icon, tb.label, tint = if (sel) C.Blue else C.Muted, modifier = Modifier.size(26.dp))
+                        Text(tb.label, fontSize = 12.sp, color = if (sel) C.Blue else C.Muted)
+                    } else {
+                        Spacer(Modifier.height(30.dp))
+                        Text(tb.label, fontSize = 12.sp, color = if (sel) C.Blue else C.Muted)
+                    }
+                }
+            }
+        }
+        Box(
+            Modifier.align(Alignment.TopCenter).size(64.dp).clip(CircleShape)
+                .background(if (tab == "today") C.Blue else C.BlueTint)
+                .border(4.dp, C.Bg, CircleShape)
+                .clickable { onPick("today") },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Ico.Calendar, "Today", tint = Color.White, modifier = Modifier.size(30.dp)) }
     }
 }
