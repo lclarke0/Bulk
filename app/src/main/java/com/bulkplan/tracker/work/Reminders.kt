@@ -117,8 +117,8 @@ object Reminders {
     }
 
     fun ensureGarminSync(ctx: Context) {
+        if (Repo.state.value.settings.garminKey.isBlank()) { runCatching { WorkManager.getInstance(ctx).cancelUniqueWork("garmin") }; return }
         val wm = WorkManager.getInstance(ctx)
-        if (Repo.state.value.settings.garminKey.isBlank()) { wm.cancelUniqueWork("garmin"); return }
         val req = PeriodicWorkRequestBuilder<GarminWorker>(3, TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
