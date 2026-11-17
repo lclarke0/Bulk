@@ -26,7 +26,7 @@ jobs:
 
       - name: Render screen previews
         continue-on-error: true
-        run: ./gradlew :app:testDebugUnitTest --tests 'com.bulkplan.tracker.ScreensTest' --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --tests 'com.bulkplan.tracker.ScreensTest' --rerun --stacktrace
 
       - name: Publish screen previews to the "screens" branch
         continue-on-error: true

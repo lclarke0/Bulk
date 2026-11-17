@@ -48,7 +48,7 @@ class ScreensTest {
         logs[t] = DayLog(t, weight = 177.2, sleep = 7.8, energy = 4,
             checks = mapOf("wake" to true, "skin-am" to true, "breakfast" to true),
             foods = listOf(
-                FoodEntry("1", "Breakfast", 700.0, 35.0, 80.0, 28.0, "Breakfast", "plan:breakfast", detail = "4 eggs, a bagel with cheese, a banana, 12 oz whole milk"),
+                FoodEntry("1", "4 eggs, a bagel with cheese, a banana, 12 oz whole milk", 700.0, 35.0, 80.0, 28.0, "Breakfast", "plan:breakfast", detail = "From your plan · 35 g protein"),
                 FoodEntry("2", "Greek yogurt", 160.0, 17.0, 9.0, 4.0, "Snacks", "quick", detail = "1 cup"),
                 FoodEntry("3", "Chicken & rice bowl", 520.0, 45.0, 60.0, 9.0, "Lunch", "quick", detail = "6 oz chicken, 1 cup rice"),
             ),
