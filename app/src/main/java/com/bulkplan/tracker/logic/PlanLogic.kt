@@ -5,6 +5,7 @@ import com.bulkplan.tracker.data.DayLog
 import com.bulkplan.tracker.data.Exercise
 import com.bulkplan.tracker.data.Plan
 import com.bulkplan.tracker.data.ScheduleItem
+import com.bulkplan.tracker.data.Settings
 import com.bulkplan.tracker.data.SetEntry
 import java.time.LocalDate
 import java.time.LocalTime
@@ -61,6 +62,19 @@ object PlanLogic {
     }
 
     fun workoutForDay(plan: Plan, dw: Int): String? = plan.workouts.entries.firstOrNull { it.value.day == dw }?.key
+
+    /** Schedule kinds you can mute reminders for, with their names in Settings. */
+    val REMIND_KINDS = listOf(
+        "meal" to "Meals and snacks", "train" to "Workouts", "supp" to "Supplements and caffeine",
+        "skin" to "Skin care and showers", "task" to "Tasks, meal prep and monthly check", "coach" to "Coach check-ins", "sleep" to "Bedtime",
+    )
+
+    fun testTag(tag: String?, id: String): String? = tag ?: id.takeIf { it == "dexa" || it == "blood" }
+
+    /** Pre-start checklist without the optional tests you turned off. */
+    fun prepFor(plan: Plan, s: Settings) = plan.prep.filter { testTag(it.tag, it.id) !in s.skipTests }
+
+    fun milestonesFor(plan: Plan, s: Settings) = plan.milestones.filter { it.tag == null || it.tag !in s.skipTests }
 
     fun itemsFor(plan: Plan, d: String): List<ScheduleItem> {
         val dw = dow(d)

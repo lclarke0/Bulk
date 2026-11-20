@@ -142,7 +142,7 @@ fun ProgressScreen() {
         }
         item {
             Section("Milestones") {
-                plan.milestones.forEach { m ->
+                PlanLogic.milestonesFor(plan, state.settings).forEach { m ->
                     Row(Modifier.padding(vertical = 4.dp)) {
                         Text(PlanLogic.fmtD(addD(plan.startDate, (m.week - 1) * 7L)), modifier = Modifier.weight(0.9f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Text("Week ${m.week}: ${m.text}", modifier = Modifier.weight(2f), fontSize = 14.sp)
@@ -238,7 +238,7 @@ private fun DayEditor(d: String, onClose: () -> Unit) {
                     NumField("Protein (g)", lg.protein, "ep$d", Modifier.fillMaxWidth()) { v -> Repo.updateLog(d) { it.copy(protein = v) } }
                 } else Muted("Calories and protein come from that day’s food diary (Food tab).")
                 TextIn("Notes", lg.notes ?: "", "en$d", Modifier.fillMaxWidth(), singleLine = false, minLines = 2) { v -> Repo.updateLog(d) { it.copy(notes = v.ifBlank { null }) } }
-                MeasurementsCard(d, lg)
+                MeasurementsCard(d, lg, dexa = "dexa" !in Repo.state.value.settings.skipTests)
             }
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Done") } },

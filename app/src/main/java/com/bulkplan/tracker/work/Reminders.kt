@@ -39,7 +39,7 @@ object Reminders {
     fun createChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Schedule reminders", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Meals, training, skin care, supplements and sleep from your plan"
+            description = "Meals, training, skin care, supplements and sleep from your plan. Pick which types in the app’s Settings."
         })
     }
 
@@ -64,7 +64,7 @@ object Reminders {
         var best: Pair<LocalDateTime, Pair<String, String>>? = null
         for (i in 0..7L) {
             val d = PlanLogic.addD(today, i)
-            val times = PlanLogic.itemsFor(s.plan, d).map { it.time }.toMutableSet()
+            val times = PlanLogic.itemsFor(s.plan, d).filter { it.kind !in s.settings.remindOff }.map { it.time }.toMutableSet()
             if (s.settings.weighNudge) times += NUDGE_TIME
             for (t in times) {
                 val m = PlanLogic.mins(t)
@@ -109,7 +109,7 @@ object Reminders {
         val s = Repo.state.value
         val log = Repo.log(date)
         if (s.settings.alerts) {
-            PlanLogic.itemsFor(s.plan, date).filter { it.time == time && log.checks[it.id] != true }.forEach { notify(ctx, date, it) }
+            PlanLogic.itemsFor(s.plan, date).filter { it.time == time && log.checks[it.id] != true && it.kind !in s.settings.remindOff }.forEach { notify(ctx, date, it) }
             if (time == NUDGE_TIME && s.settings.weighNudge && PlanLogic.weightOf(log) == null && date == PlanLogic.today())
                 notify(ctx, date, ScheduleItem(NUDGE, NUDGE_TIME, "task", "Log your morning weight", "Open Bulk Plan and enter today's weigh-in. It drives your calorie calls."))
         }

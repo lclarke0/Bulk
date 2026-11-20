@@ -72,7 +72,7 @@ import com.bulkplan.tracker.logic.Actions
 import com.bulkplan.tracker.logic.Macros
 import com.bulkplan.tracker.logic.PlanLogic
 import com.bulkplan.tracker.logic.PlanLogic.fmtN
-import com.bulkplan.tracker.net.Claude
+import com.bulkplan.tracker.net.Ai
 import com.bulkplan.tracker.net.FoodApi
 import com.bulkplan.tracker.net.FoodResult
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -93,7 +93,7 @@ private sealed interface FoodDialog {
     data object Describe : FoodDialog
     data class Photo(val uri: Uri) : FoodDialog
     data object Quick : FoodDialog
-    data class Guesses(val list: List<Claude.FoodGuess>, val source: String) : FoodDialog
+    data class Guesses(val list: List<Ai.FoodGuess>, val source: String) : FoodDialog
     data class Item(val entry: FoodEntry) : FoodDialog
 }
 
@@ -255,7 +255,7 @@ fun FoodScreen() {
         FoodDialog.Describe -> DescribeDialog(onDismiss = { dialog = null }) { text ->
             dialog = null; busy = true
             scope.launch {
-                try { dialog = FoodDialog.Guesses(Claude.estimateMeal(state.settings.claudeKey, state.settings.claudeModel, text), "claude") }
+                try { dialog = FoodDialog.Guesses(Ai.estimateMeal(state.settings, text), "ai") }
                 catch (e: Exception) { toast(e.message ?: "Couldn’t estimate that") }
                 busy = false
             }
@@ -265,7 +265,7 @@ fun FoodScreen() {
             scope.launch {
                 try {
                     val b64 = withContext(Dispatchers.IO) { encodePhoto(ctx, d.uri) }
-                    dialog = FoodDialog.Guesses(Claude.readPhoto(state.settings.claudeKey, state.settings.claudeModel, b64, servings, hint), "label")
+                    dialog = FoodDialog.Guesses(Ai.readPhoto(state.settings, b64, servings, hint), "label")
                 } catch (e: Exception) { toast(e.message ?: "Couldn’t read that photo") }
                 busy = false
             }
@@ -329,7 +329,7 @@ private fun AddFoodSheet(meal: String, date: String, onDismiss: () -> Unit, onAc
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-            Muted("Describe it and Label photo use Claude to estimate calories and macros.")
+            Muted("Describe it and Label photo use your AI (Settings › AI coach) to estimate calories and macros.")
             if (planMeals.isNotEmpty()) {
                 Text("From your plan", style = H3)
                 planMeals.forEach { pm ->
@@ -463,7 +463,7 @@ private fun DescribeDialog(onDismiss: () -> Unit, onGo: (String) -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(text, { text = it }, "e.g. Chipotle chicken bowl, double rice, no beans", Modifier.fillMaxWidth(), singleLine = false, minLines = 3)
-                Muted("Claude estimates calories and macros. Include portions and restaurant names when you can.")
+                Muted("Your AI estimates calories and macros. Include portions and restaurant names when you can.")
             }
         },
         confirmButton = { Button(enabled = text.isNotBlank(), onClick = { onGo(text) }) { Text("Estimate") } },
@@ -484,7 +484,7 @@ private fun PhotoDialog(onDismiss: () -> Unit, onGo: (Double, String) -> Unit) {
                 Field(hint, { hint = it }, "What is it? (optional)")
             }
         },
-        confirmButton = { Button(onClick = { onGo(servings.toDoubleOrNull() ?: 1.0, hint) }) { Text("Read with Claude") } },
+        confirmButton = { Button(onClick = { onGo(servings.toDoubleOrNull() ?: 1.0, hint) }) { Text("Read label") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -529,13 +529,13 @@ private fun QuickDialog(initialMeal: String, onDismiss: () -> Unit, onAdd: (Food
 }
 
 @Composable
-private fun GuessDialog(list: List<Claude.FoodGuess>, source: String, initialMeal: String, onDismiss: () -> Unit, onAdd: (List<FoodEntry>, Boolean) -> Unit) {
+private fun GuessDialog(list: List<Ai.FoodGuess>, source: String, initialMeal: String, onDismiss: () -> Unit, onAdd: (List<FoodEntry>, Boolean) -> Unit) {
     val picked = remember { mutableStateListOf<Int>().apply { addAll(list.indices) } }
     var meal by remember { mutableStateOf(initialMeal) }
     var save by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = C.Card,
-        title = { Text("Claude’s estimate", color = C.Text) },
+        title = { Text("AI estimate", color = C.Text) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 list.forEachIndexed { i, g ->
@@ -557,7 +557,7 @@ private fun GuessDialog(list: List<Claude.FoodGuess>, source: String, initialMea
                 onAdd(picked.sorted().map { i ->
                     val g = list[i]
                     FoodEntry(Actions.newId(), g.name, g.macros.kcal, g.macros.protein, g.macros.carbs, g.macros.fat, meal, source, Instant.now().toString(),
-                        detail = if (source == "label") "From a label photo" else "Estimated by Claude")
+                        detail = if (source == "label") "From a label photo" else "Estimated by AI")
                 }, save)
             }) { Text("Add") }
         },

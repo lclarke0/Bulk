@@ -26,13 +26,19 @@ import kotlinx.serialization.json.longOrNull
 import java.util.Locale
 
 object Coach {
-    val RULES = """You are a strength and nutrition coach for one person, working through the 6-month block of their muscle-building plan (long-term goal: 175 lb to 225 lb, +15 lb of muscle; 6-month target about 190 lb). Their plan, recent logs, food diary totals, Garmin data and lift history are below.
+    fun rules(p: Plan, skipTests: List<String> = emptyList()): String {
+        val pr = p.profile; val t = p.targets
+        fun lb(x: Double) = fmtN(x)
+        val dir = if (pr.goalWeight >= pr.startWeight) "gain" else "loss"
+        val early = String.format(Locale.US, "%+.1f", t.gainEarly * 2); val late = String.format(Locale.US, "%+.1f", t.gainLate * 2)
+        val skipped = listOfNotNull("DEXA scans".takeIf { "dexa" in skipTests }, "bloodwork".takeIf { "blood" in skipTests })
+        return """You are a strength and nutrition coach for one person, working through their ${p.weeks}-week plan (long-term goal: ${lb(pr.startWeight)} lb to ${lb(pr.goalWeight)} lb${if (pr.goalMuscleLb > 0) ", +${lb(pr.goalMuscleLb)} lb of muscle" else ""}; target at the end of this plan about ${lb(pr.sixMonthWeight)} lb). Their plan, recent logs, food diary totals, Garmin data and lift history are below.
 
 How to coach:
 - Be direct and specific. Short paragraphs, plain words.
 - Ask follow-up questions when you need context (sleep, pain, schedule, appetite, missed sessions). Ask at most 3 at a time, then wait for answers before proposing changes.
-- Base calorie changes on the rule: compare 2-week average weights; target +1.5 lb per 2 weeks in weeks 1–8 and +1 lb per 2 weeks after. More than 0.5 lb under: +200 kcal as carbs. More than 0.5 lb over: −150 kcal.
-- Respect their food dislikes and equipment.
+- Base calorie changes on the rule: compare 2-week average weights; target $early lb per 2 weeks in weeks 1–${t.earlyWeeks} and $late lb per 2 weeks after (weight $dir). More than 0.5 lb under target: +200 kcal as carbs. More than 0.5 lb over: −150 kcal.
+- Respect their food dislikes and equipment.${if (skipped.isNotEmpty()) "\n- They chose not to do ${skipped.joinToString(" or ")}. Don't schedule or push them." else ""}
 - You are not their doctor. Send anything that sounds like injury, abnormal blood results or other health problems to a doctor.
 
 When you propose plan changes, end your message with ONE fenced json block exactly like this:
@@ -40,6 +46,7 @@ When you propose plan changes, end your message with ONE fenced json block exact
 {"summary":"one line","changes":[{"op":"set","path":["targets","calories"],"value":3700,"why":"weight flat for 2 weeks"}]}
 ```
 Rules for changes: op is "set", "add" or "remove". path is an array of keys into the PLAN object. Inside arrays, address items by their "id" string (for example ["workouts","upper","exercises","bench","sets"] or ["schedule","caf","time"]). "add" appends value to the array at path (new exercises need id, name, sets, reps, muscle, compound, note; new schedule items need id, time "HH:MM", kind, title, detail, days [0=Sun..6=Sat], and meals also protein and kcal). "remove" deletes the item or key at path. Only include changes the person has agreed to or that the data clearly supports. The app shows each change to the person to approve before applying it. Leave the json block out when you're only asking questions."""
+    }
 
     val STARTERS = listOf(
         "Weekly check-in" to "Start my weekly check-in. Look at my numbers, tell me what stands out, and ask me what you need to know before suggesting any changes.",
@@ -83,7 +90,7 @@ Rules for changes: op is "set", "add" or "remove". path is an array of keys into
         return """TODAY: $t (${PlanLogic.DAYN[PlanLogic.dow(t)]}). Plan start ${p.startDate}. $status
 CURRENT 7-DAY AVERAGE WEIGHT: ${String.format(Locale.US, "%.1f", PlanLogic.curWeight(p, logs))} lb. Protein target ${PlanLogic.proteinTarget(p, logs)} g. Calorie target ${p.targets.calories}.
 APP'S CALORIE RULE CHECK: ${cr.text}
-PRE-START CHECKLIST: ${p.prep.joinToString("; ") { (if (s.prepDone[it.id] == true) "[done] " else "[ ] ") + it.text }}
+PRE-START CHECKLIST: ${PlanLogic.prepFor(p, s.settings).joinToString("; ") { (if (s.prepDone[it.id] == true) "[done] " else "[ ] ") + it.text }}
 
 DAILY LOG, LAST 21 DAYS:
 ${days.joinToString("\n").ifEmpty { "(nothing logged yet)" }}
@@ -97,7 +104,7 @@ PLAN (JSON):
 ${Repo.json.encodeToString(Plan.serializer(), p)}"""
     }
 
-    fun fullPrompt(s: AppState, logs: Map<String, DayLog>, ask: String) = RULES + "\n\n" + context(s, logs) + "\n\n---\n" + ask
+    fun fullPrompt(s: AppState, logs: Map<String, DayLog>, ask: String) = rules(s.plan, s.settings.skipTests) + "\n\n" + context(s, logs) + "\n\n---\n" + ask
 
     // ---------- proposals ----------
     fun parseProposal(text: String): Proposal? {
@@ -114,7 +121,7 @@ ${Repo.json.encodeToString(Plan.serializer(), p)}"""
             if (changes.isEmpty()) null
             else Proposal((o["summary"] as? JsonPrimitive)?.content ?: "Plan update", changes.take(40))
         } catch (e: Exception) {
-            Proposal(error = "Claude’s change list couldn’t be read: ${e.message}")
+            Proposal(error = "The AI’s change list couldn’t be read: ${e.message}")
         }
     }
 

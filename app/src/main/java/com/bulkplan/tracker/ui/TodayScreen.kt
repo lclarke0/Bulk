@@ -88,7 +88,7 @@ private fun endTime(i: ScheduleItem): String {
 }
 
 @Composable
-fun TodayScreen(onGo: (String) -> Unit) {
+fun TodayScreen(onGo: (String) -> Unit, onEditSchedule: () -> Unit = {}) {
     val state by Repo.state.collectAsStateWithLifecycle()
     val logs by Repo.logs.collectAsStateWithLifecycle()
     var nowM by remember { mutableIntStateOf(PlanLogic.nowMins()) }
@@ -130,11 +130,21 @@ fun TodayScreen(onGo: (String) -> Unit) {
                 }
             }
         }
+        if (state.settings.intakeStatus == "pending") item {
+            Section("Waiting for your custom plan", icon = Ico.Sparkle, highlight = true) {
+                Muted("Send your plan request to any AI, then import its reply. You’re on the starter plan until then.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillButton("Import plan", Ico.Sparkle, selected = true) { onGo("import") }
+                    PillButton("Get the request", Ico.Clipboard) { onGo("intake-end") }
+                }
+            }
+        }
         if (w < 1) item {
-            val dn = plan.prep.count { state.prepDone[it.id] == true }
-            Section("Before week 1", icon = Ico.TaskIcon, action = { Tag("$dn/${plan.prep.size}") }) {
+            val prep = PlanLogic.prepFor(plan, state.settings)
+            val dn = prep.count { state.prepDone[it.id] == true }
+            Section("Before week 1", icon = Ico.TaskIcon, action = { Tag("$dn/${prep.size}") }) {
                 Muted("Your plan starts ${PlanLogic.fmtD(plan.startDate)}. Change the date in Settings.")
-                plan.prep.forEach { p ->
+                prep.forEach { p ->
                     val on = state.prepDone[p.id] == true
                     Row(Modifier.fillMaxWidth().clickable { Repo.update { it.copy(prepDone = it.prepDone + (p.id to !on)) } }.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -145,12 +155,14 @@ fun TodayScreen(onGo: (String) -> Unit) {
                 }
             }
         }
-        plan.milestones.filter { it.week == w }.takeIf { it.isNotEmpty() }?.let { ms ->
+        PlanLogic.milestonesFor(plan, state.settings).filter { it.week == w }.takeIf { it.isNotEmpty() }?.let { ms ->
             item { Section(highlight = true) { Tag("This week"); Text(ms.joinToString(" · ") { it.text }, style = H3) } }
         }
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(PlanLogic.DAYN[PlanLogic.dow(t)], style = H2, modifier = Modifier.weight(1f))
+                PillButton("Edit", Ico.Edit, onClick = onEditSchedule)
+                Spacer(Modifier.width(8.dp))
                 PillButton(FILTERS.first { it.second == filter }.first.takeIf { filter != null } ?: "Filter", Ico.Filter, selected = filter != null) { showFilter = !showFilter }
             }
             if (showFilter) FlowRow(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -195,12 +207,12 @@ fun TodayScreen(onGo: (String) -> Unit) {
                 }
             }
         }
-        item { MeasurementsCard(t, lg) }
+        item { MeasurementsCard(t, lg, dexa = "dexa" !in state.settings.skipTests) }
         item { Spacer(Modifier.height(24.dp)) }
     }
 
     val target = editing
-    if (target != null || adding) TaskDialog(target, onDismiss = { editing = null; adding = false })
+    if (target != null || adding) TaskDialog(target, onDismiss = { editing = null; adding = false }, fromDay = PlanLogic.dow(t))
 }
 
 @Composable
@@ -269,72 +281,14 @@ private fun ScheduleCard(
     }
 }
 
-/** Add a new schedule item, or edit/remove an existing one. Changes are saved to the plan and can be undone in Coach. */
 @Composable
-private fun TaskDialog(item: ScheduleItem?, onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf(item?.title ?: "") }
-    var time by remember { mutableStateOf(item?.time ?: "12:00") }
-    var detail by remember { mutableStateOf(item?.detail ?: "") }
-    var kind by remember { mutableStateOf(item?.kind ?: "task") }
-    var kcal by remember { mutableStateOf(item?.kcal?.toString() ?: "") }
-    var protein by remember { mutableStateOf(item?.protein?.toString() ?: "") }
-    val days = remember { mutableStateListOf<Int>().apply { addAll(item?.days ?: listOf(0, 1, 2, 3, 4, 5, 6)) } }
-    val validTime = Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(time.trim())
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = C.Card,
-        title = { Text(if (item == null) "Add task" else "Edit ${item.title}", color = C.Text) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Field(title, { title = it }, "Title", Modifier.fillMaxWidth())
-                Field(time, { time = it }, "Time (24-hour, e.g. 14:30)", Modifier.fillMaxWidth())
-                Field(detail, { detail = it }, "Details", Modifier.fillMaxWidth(), singleLine = false, minLines = 2)
-                Muted("Type")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("task" to "Task", "meal" to "Meal", "supp" to "Supplement", "skin" to "Skin care", "train" to "Training", "sleep" to "Sleep").forEach { (k, l) ->
-                        Chip(l, kind == k) { kind = k }
-                    }
-                }
-                if (kind == "meal") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field(kcal, { kcal = it }, "kcal", Modifier.weight(1f), number = true)
-                    Field(protein, { protein = it }, "Protein g", Modifier.weight(1f), number = true)
-                }
-                Muted("Days")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(1, 2, 3, 4, 5, 6, 0).forEach { d -> Chip(PlanLogic.DAYS[d], d in days) { if (d in days) days.remove(d) else days.add(d) } }
-                }
-                if (item != null) TextButton(onClick = {
-                    Repo.changePlan("Removed ${item.title} at ${PlanLogic.fmtT(item.time)}") { p -> p.copy(schedule = p.schedule.filterNot { it.id == item.id }) }
-                    onDismiss()
-                }) { Text("Remove from schedule", color = C.Red) }
-            }
-        },
-        confirmButton = {
-            Button(enabled = title.isNotBlank() && validTime && days.isNotEmpty(), onClick = {
-                val new = ScheduleItem(
-                    id = item?.id ?: ("t" + System.currentTimeMillis().toString(36)), time = time.trim(), kind = kind, title = title.trim(),
-                    detail = detail.trim(), days = days.sorted(),
-                    kcal = if (kind == "meal") kcal.toIntOrNull() else null, protein = if (kind == "meal") protein.toIntOrNull() else null,
-                    dur = item?.dur ?: if (kind == "train") 90 else null,
-                )
-                Repo.changePlan((if (item == null) "Added " else "Edited ") + new.title) { p ->
-                    p.copy(schedule = if (item == null) p.schedule + new else p.schedule.map { if (it.id == item.id) new else it })
-                }
-                onDismiss()
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-fun MeasurementsCard(d: String, lg: DayLog) {
+fun MeasurementsCard(d: String, lg: DayLog, dexa: Boolean = true) {
     var open by remember { mutableStateOf(lg.m.values.any { it != null }) }
     Section("Measurements", action = { TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else "Show", color = C.BlueSoft) } }) {
-        Muted("Monthly: waist, body measurements, blood pressure, resting heart rate. DEXA results when you get them.")
+        Muted("Monthly: waist, body measurements, blood pressure, resting heart rate." + if (dexa) " DEXA results when you get them." else "")
         if (open) {
             val fields = listOf("waist" to "Waist at navel (in)", "arm" to "Arm (in)", "chest" to "Chest (in)", "thigh" to "Thigh (in)",
-                "rhr" to "Resting heart rate", "bf" to "DEXA body fat %", "lean" to "DEXA lean mass (lb)")
+                "rhr" to "Resting heart rate") + if (dexa) listOf("bf" to "DEXA body fat %", "lean" to "DEXA lean mass (lb)") else emptyList()
             fields.chunked(2).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { (k, label) ->

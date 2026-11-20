@@ -122,4 +122,96 @@ class LogicTest {
         assertEquals(27000.0, Garmin.parse(sleep).getValue("2026-11-24").getValue("sleepS"), 0.1)
         assertEquals(176.37, Garmin.parse(weight).getValue("2026-11-24").getValue("weightLb"), 0.05)
     }
+
+    @Test fun defaultPlanRoundTripsThroughThePlanFileFormat() {
+        val plan = DefaultPlan.create("2026-11-23")
+        val reply = "Here you go!\n\n```bulkplan\n{\"bulkplan\":1,\"summary\":\"Upper/lower plus PPL.\",\"plan\":" +
+            Repo.json.encodeToString(com.bulkplan.tracker.data.Plan.serializer(), plan) + "}\n```\n\nCopy this whole reply."
+        val r = com.bulkplan.tracker.logic.PlanImport.parse(reply, today = "2026-11-20")
+        assertEquals("Upper/lower plus PPL.", r.summary)
+        assertEquals(plan.workouts.keys, r.plan.workouts.keys)
+        assertEquals(plan.schedule.map { it.id }, r.plan.schedule.map { it.id })
+        assertEquals(plan.targets, r.plan.targets)
+        assertTrue("unexpected warnings: ${r.warnings}", r.warnings.isEmpty())
+    }
+
+    @Test fun planImportFixesCommonAiSlips() {
+        val reply = """
+Sure — here's your plan.
+```bulkplan
+{
+  "bulkplan": 1,
+  "plan": {
+    "startDate": "2026-11-23", // Monday
+    "weeks": 12,
+    "targets": {"calories": 2800, "proteinPerLb": 1.0},
+    "workouts": {
+      "a": {"name": "Full body A", "day": 1, "exercises": [{"id": "squat", "name": "Squat", "sets": 3, "reps": 8, "muscle": "Quads", "compound": true}]},
+      "b": {"name": "Full body B", "day": 4, "exercises": [{"id": "squat", "name": "Front squat", "sets": 3, "reps": "8–10", "muscle": "quads"}]},
+    },
+    "schedule": [
+      {"id": "breakfast", "time": "7:00", "kind": "meal", "title": "Breakfast", "days": [], "kcal": 1400, "protein": 70},
+      {"id": "breakfast", "time": "7:30 PM", "kind": "meal", "title": "Dinner", "days": [0,1,2,3,4,5,6], "kcal": 1400, "protein": 70},
+      {"id": "gym", "time": "17:30", "kind": "workout", "title": "Train", "days": [1]},
+      {"id": "bad", "time": "lunchtime", "kind": "task", "title": "Walk", "days": [2]},
+    ]
+  }
+}
+```
+""".trimIndent()
+        val r = com.bulkplan.tracker.logic.PlanImport.parse(reply, today = "2026-11-20")
+        val p = r.plan
+        assertEquals(listOf("squat", "squat-2"), p.workouts.values.flatMap { w -> w.exercises.map { it.id } })
+        assertEquals("quads", p.workouts.getValue("a").exercises[0].muscle)
+        assertEquals("8", p.workouts.getValue("a").exercises[0].reps)
+        assertEquals(listOf("07:00", "19:30", "17:30"), p.schedule.map { it.time })
+        assertEquals(listOf("breakfast", "breakfast-2", "gym"), p.schedule.map { it.id })
+        assertEquals((0..6).toList(), p.schedule[0].days)
+        assertEquals("train", p.schedule[2].kind)
+        assertEquals(1, p.blocks.size)
+        assertTrue(r.warnings.any { it.contains("unreadable time") })
+        assertTrue(r.warnings.any { it.contains("Thursday") }) // workout B has no training time
+    }
+
+    @Test fun cutOffPlanSaysSo() {
+        val cut = "```bulkplan\n{\"bulkplan\":1,\"plan\":{\"startDate\":\"2026-11-23\",\"workouts\":{\"a\":{\"name\":\"A\",\"day\":1,\"exercises\":["
+        val e = runCatching { com.bulkplan.tracker.logic.PlanImport.parse(cut, today = "2026-11-20") }.exceptionOrNull()
+        assertNotNull(e)
+        assertTrue(e!!.message!!, e.message!!.contains("cut off"))
+    }
+
+    @Test fun optionalTestsCanBeSkipped() {
+        val old = DefaultPlan.create("2026-11-23").let { p ->
+            p.copy(milestones = p.milestones.filter { it.week != 26 } + com.bulkplan.tracker.data.Milestone(26, "Deload, DEXA scan, repeat bloodwork, photos"),
+                prep = p.prep.map { it.copy(tag = null) })
+        }
+        val m = DefaultPlan.migrate(old)
+        val s = com.bulkplan.tracker.data.Settings(skipTests = listOf("dexa", "blood"))
+        assertFalse(PlanLogic.prepFor(m, s).any { it.id == "dexa" || it.id == "blood" })
+        assertEquals(listOf("Deload, photos and measurements"), PlanLogic.milestonesFor(m, s).filter { it.week == 26 }.map { it.text })
+        assertEquals(3, PlanLogic.milestonesFor(m, com.bulkplan.tracker.data.Settings()).count { it.week == 26 })
+        assertFalse(Coach.rules(m, listOf("dexa")).contains("bloodwork"))
+        assertTrue(Coach.rules(m, listOf("dexa")).contains("DEXA scans"))
+    }
+
+    @Test fun intakeDocumentCarriesAnswersAndFormat() {
+        val a = mapOf("name" to "Liam", "weight" to "175", "wake" to "06:30", "trainDays" to "1,2,4,5", "dexa" to com.bulkplan.tracker.logic.Intake.SKIP, "blood" to "Include")
+        val doc = com.bulkplan.tracker.logic.Intake.document(a, "2026-11-20")
+        assertTrue(doc.contains("**First name:** Liam"))
+        assertTrue(doc.contains("6:30 am"))
+        assertTrue(doc.contains("Monday, Tuesday, Thursday, Friday"))
+        assertTrue(doc.contains("```bulkplan"))
+        assertTrue(doc.contains("\"schedule\""))
+        assertEquals(listOf("dexa"), com.bulkplan.tracker.logic.Intake.skipTests(a))
+    }
+
+    @Test fun aiSettingsFallBackToTheOldClaudeKey() {
+        val old = com.bulkplan.tracker.data.Settings(claudeKey = "sk-ant", claudeModel = "claude-sonnet-5-5")
+        val c = com.bulkplan.tracker.net.Ai.cfg(old)
+        assertEquals("anthropic", c.p.id); assertEquals("sk-ant", c.key); assertEquals("claude-sonnet-5-5", c.model)
+        val fresh = com.bulkplan.tracker.net.Ai.cfg(com.bulkplan.tracker.data.Settings())
+        assertEquals("gemini", fresh.p.id); assertFalse(com.bulkplan.tracker.net.Ai.hasKey(com.bulkplan.tracker.data.Settings()))
+        val ds = com.bulkplan.tracker.net.Ai.cfg(com.bulkplan.tracker.data.Settings(aiProvider = "deepseek", aiKeys = mapOf("deepseek" to "k")))
+        assertEquals("https://api.deepseek.com", ds.base); assertEquals("deepseek-chat", ds.model)
+    }
 }

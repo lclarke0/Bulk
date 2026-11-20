@@ -33,7 +33,7 @@ import java.io.FileOutputStream
 class ScreensTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun seed() {
+    private fun seed(intake: String = "done") {
         Repo.init(ApplicationProvider.getApplicationContext())
         val t = PlanLogic.today()
         // A Monday two weeks before this week's Monday, so the plan is in week 3.
@@ -55,7 +55,7 @@ class ScreensTest {
             sets = mapOf("squat" to listOf(SetEntry(205.0, 8.0, true), SetEntry(205.0, 7.0, false))),
         )
         Repo.replaceAll(
-            AppState(plan = plan, settings = Settings(name = "Liam", claudeKey = "sk-test"),
+            AppState(plan = plan, settings = Settings(name = "Liam", aiProvider = "gemini", aiKeys = mapOf("gemini" to "test"), intakeStatus = intake, remindOff = listOf("skin"), skipTests = listOf("blood")),
                 coach = Coach(listOf(
                     ChatMessage("user", "Start my weekly check-in.", display = "Start my weekly check-in."),
                     ChatMessage("assistant", "Your 2-week average is up 1.4 lb against a 1.5 lb target, so calories stay at 3,500. Protein has been about 15 g short most days. How has your appetite been in the evenings?"),
@@ -64,10 +64,12 @@ class ScreensTest {
         )
     }
 
-    private fun shot(name: String, tab: String) {
-        seed()
+    private fun shot(name: String, tab: String) = shotOf(name) { App(tab) {} }
+
+    private fun shotOf(name: String, intake: String = "done", content: @androidx.compose.runtime.Composable () -> Unit) {
+        seed(intake)
         rule.mainClock.autoAdvance = false
-        rule.setContent { BulkTheme { App(tab) {} } }
+        rule.setContent { BulkTheme { content() } }
         repeat(4) { rule.mainClock.advanceTimeBy(500); rule.waitForIdle() }
         val v = rule.activity.window.decorView.rootView
         val bmp = Bitmap.createBitmap(v.width, v.height, Bitmap.Config.ARGB_8888)
@@ -81,4 +83,11 @@ class ScreensTest {
     @Test fun workout() = shot("3-workout", "workout")
     @Test fun coach() = shot("4-coach", "coach")
     @Test fun progress() = shot("5-progress", "progress")
+    @Test fun intake() = shotOf("6-intake", intake = "") { App("today") {} }
+    @Test fun schedule() = shotOf("7-schedule") { com.bulkplan.tracker.ui.ScheduleScreen {} }
+    @Test fun settings() = shotOf("8-settings") { com.bulkplan.tracker.ui.SettingsScreen({}) }
+    @Test fun intakeEnd() = shotOf("9-intake-end") {
+        Repo.update { it.copy(intake = mapOf("name" to "Liam", "weight" to "175")) }
+        com.bulkplan.tracker.ui.IntakeScreen(startAtEnd = true, onClose = {}, onImport = {})
+    }
 }

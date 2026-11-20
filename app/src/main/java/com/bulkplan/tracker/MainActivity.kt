@@ -73,6 +73,9 @@ import com.bulkplan.tracker.ui.CoachScreen
 import com.bulkplan.tracker.ui.FoodScreen
 import com.bulkplan.tracker.ui.ProgressScreen
 import com.bulkplan.tracker.ui.SettingsScreen
+import com.bulkplan.tracker.ui.ScheduleScreen
+import com.bulkplan.tracker.ui.IntakeScreen
+import com.bulkplan.tracker.ui.ImportPlanScreen
 import com.bulkplan.tracker.ui.TodayScreen
 import com.bulkplan.tracker.ui.WorkoutScreen
 import kotlinx.coroutines.launch
@@ -118,17 +121,34 @@ private val TABS = listOf(
 @Composable
 fun App(requestedTab: String?, consumed: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf("today") }
-    var settings by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(requestedTab) { if (requestedTab != null) { tab = requestedTab; settings = false; consumed() } }
+    // Full-screen pages over the tabs: settings, schedule, intake, import.
+    var overlay by rememberSaveable { mutableStateOf<String?>(null) }
+    var importText by remember { mutableStateOf("") }
+    var intakeAtEnd by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(requestedTab) { if (requestedTab != null) { tab = requestedTab; overlay = null; consumed() } }
     val state by Repo.state.collectAsStateWithLifecycle()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val toast: (String) -> Unit = { m -> scope.launch { snack.currentSnackbarData?.dismiss(); snack.showSnackbar(m) } }
 
     CompositionLocalProvider(LocalToast provides toast) {
-        if (settings) {
-            SettingsScreen(onClose = { settings = false })
+        val open: (String) -> Unit = { k ->
+            when (k) {
+                "settings", "schedule" -> overlay = k
+                "intake", "intake-end" -> { intakeAtEnd = k == "intake-end"; overlay = "intake" }
+                "import" -> { importText = ""; overlay = "import" }
+                else -> { tab = k; overlay = null }
+            }
+        }
+        if (state.settings.intakeStatus.isBlank() && overlay != "import") {
+            IntakeScreen(startAtEnd = false, onClose = { overlay = null }, onImport = { importText = it; overlay = "import" })
             return@CompositionLocalProvider
+        }
+        when (overlay) {
+            "settings" -> { SettingsScreen(onClose = { overlay = null }, onOpen = open); return@CompositionLocalProvider }
+            "schedule" -> { ScheduleScreen(onClose = { overlay = null }); return@CompositionLocalProvider }
+            "intake" -> { IntakeScreen(startAtEnd = intakeAtEnd, onClose = { overlay = null }, onImport = { importText = it; overlay = "import" }); return@CompositionLocalProvider }
+            "import" -> { ImportPlanScreen(importText, onClose = { overlay = null }); return@CompositionLocalProvider }
         }
         val t = PlanLogic.today(); val w = PlanLogic.weekOf(state.plan, t); val b = PlanLogic.blockFor(state.plan, w)
         val sub = PlanLogic.fmtD(t) + " · " + when {
@@ -140,16 +160,16 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
         Scaffold(
             containerColor = C.Bg,
             snackbarHost = { SnackbarHost(snack) },
-            topBar = { Box(Modifier.statusBarsPadding()) { PageHeader(current.title, current.icon, sub) { settings = true } } },
+            topBar = { Box(Modifier.statusBarsPadding()) { PageHeader(current.title, current.icon, sub) { overlay = "settings" } } },
             bottomBar = { BottomBar(tab) { tab = it } },
         ) { pad ->
             Box(Modifier.padding(pad)) {
                 when (tab) {
-                    "today" -> TodayScreen(onGo = { tab = it })
+                    "today" -> TodayScreen(onGo = open, onEditSchedule = { overlay = "schedule" })
                     "food" -> FoodScreen()
                     "workout" -> WorkoutScreen()
                     "progress" -> ProgressScreen()
-                    "coach" -> CoachScreen(onOpenSettings = { settings = true }, onGo = { tab = it })
+                    "coach" -> CoachScreen(onOpenSettings = { overlay = "settings" }, onGo = open)
                 }
             }
         }

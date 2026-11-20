@@ -59,7 +59,11 @@ import com.bulkplan.tracker.LocalToast
 import com.bulkplan.tracker.data.DefaultPlan
 import com.bulkplan.tracker.data.Repo
 import com.bulkplan.tracker.data.ScheduleItem
-import com.bulkplan.tracker.net.Claude
+import com.bulkplan.tracker.net.Ai
+import com.bulkplan.tracker.logic.PlanLogic
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.foundation.clickable
 import com.bulkplan.tracker.net.Garmin
 import com.bulkplan.tracker.work.Reminders
 import kotlinx.coroutines.Dispatchers
@@ -68,7 +72,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 @Composable
-fun SettingsScreen(onClose: () -> Unit) {
+fun SettingsScreen(onClose: () -> Unit, onOpen: (String) -> Unit = {}) {
     BackHandler(onBack = onClose)
     val state by Repo.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
@@ -86,8 +90,12 @@ fun SettingsScreen(onClose: () -> Unit) {
     val weak = remember { mutableStateListOf<String>().apply { addAll(plan.weakMuscles) } }
 
     var name by remember { mutableStateOf(st.name) }
-    var claudeKey by remember { mutableStateOf(st.claudeKey) }
-    var model by remember { mutableStateOf(st.claudeModel) }
+    var provider by remember { mutableStateOf(Ai.providerId(st)) }
+    var aiKey by remember { mutableStateOf(Ai.keyFor(st, provider)) }
+    var model by remember { mutableStateOf(Ai.modelFor(st, provider)) }
+    var baseUrl by remember { mutableStateOf(st.aiBaseUrl) }
+    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showModels by remember { mutableStateOf(false) }
     var garminKey by remember { mutableStateOf(st.garminKey) }
     var usda by remember { mutableStateOf(st.usdaKey) }
     var diag by remember { mutableStateOf<String?>(null) }
@@ -124,6 +132,11 @@ fun SettingsScreen(onClose: () -> Unit) {
             }
 
             Section("Plan") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillButton("Edit schedule", Ico.Calendar) { onOpen("schedule") }
+                    PillButton("Redo intake questions", Ico.Clipboard) { onOpen("intake") }
+                    PillButton("Import a plan from AI", Ico.Sparkle) { onOpen("import") }
+                }
                 val num = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 OutlinedTextField(start, { start = it }, label = { Text("Start date (YYYY-MM-DD, a Monday)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -157,26 +170,57 @@ fun SettingsScreen(onClose: () -> Unit) {
                 }) { Text("Save plan settings") }
             }
 
-            Section("Claude") {
-                Muted("Coach check-ins, meal estimates and label photos use the Claude API with your own key, billed per use by Anthropic and separate from a Claude subscription. Create a key at console.anthropic.com.")
-                OutlinedTextField(claudeKey, { claudeKey = it }, label = { Text("Claude API key") }, singleLine = true,
+            Section("AI coach") {
+                Muted("The coach, meal estimates, label photos and plan building use the AI service you pick, with your own API key. You pay that service per use; Gemini and DeepSeek cost the least.")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Ai.PROVIDERS.forEach { p ->
+                        Chip(p.name, provider == p.id) {
+                            provider = p.id; aiKey = Ai.keyFor(Repo.state.value.settings, p.id); model = Ai.modelFor(Repo.state.value.settings, p.id)
+                            models = emptyList(); showModels = false
+                        }
+                    }
+                }
+                val pr = Ai.provider(provider)
+                Muted(pr.note)
+                if (pr.keyUrl.isNotBlank()) OutlinedButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pr.keyUrl))) }) { Text("Get a ${pr.name.substringBefore(" (")} key") }
+                if (provider == "custom") OutlinedTextField(baseUrl, { baseUrl = it }, label = { Text("Base URL (e.g. https://api.groq.com/openai/v1)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(aiKey, { aiKey = it }, label = { Text("${pr.name.substringBefore(" (")} API key") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        Repo.update { it.copy(settings = it.settings.copy(claudeKey = claudeKey.trim(), claudeModel = model.trim().ifBlank { "claude-sonnet-5-5" })) }
-                        toast("Saved")
-                    }) { Text("Save") }
+                fun saveAi() = Repo.update {
+                    it.copy(settings = it.settings.copy(
+                        aiProvider = provider,
+                        aiKeys = it.settings.aiKeys + (provider to aiKey.trim()),
+                        aiModels = it.settings.aiModels + (provider to model.trim()),
+                        aiBaseUrl = if (provider == "custom") baseUrl.trim() else it.settings.aiBaseUrl,
+                    ))
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { saveAi(); toast("Saved. The coach now uses ${pr.name.substringBefore(" (")}.") }) { Text("Save") }
                     OutlinedButton(enabled = !working, onClick = {
-                        working = true
+                        saveAi(); working = true
+                        scope.launch {
+                            try { models = Ai.listModels(Ai.cfg(Repo.state.value.settings)); showModels = true; if (models.isEmpty()) toast("No models found for that key") }
+                            catch (e: Exception) { toast(e.message ?: "Couldn’t load models") }
+                            working = false
+                        }
+                    }) { Text("Load models") }
+                    OutlinedButton(enabled = !working, onClick = {
+                        saveAi(); working = true
                         scope.launch {
                             toast(try {
-                                Claude.chat(claudeKey.trim(), model.trim(), listOf(com.bulkplan.tracker.data.ChatMessage("user", "Reply with just: Connected.")))
-                                "Claude is connected"
-                            } catch (e: Exception) { e.message ?: "Claude test failed" })
+                                Ai.chat(Repo.state.value.settings, listOf(com.bulkplan.tracker.data.ChatMessage("user", "Reply with just: Connected.")))
+                                "${pr.name.substringBefore(" (")} is connected"
+                            } catch (e: Exception) { e.message ?: "Test failed" })
                             working = false
                         }
                     }) { Text("Test") }
+                }
+                if (showModels && models.isNotEmpty()) {
+                    Muted("Tap a model to use it, then Save. Names with flash, mini, lite, haiku or small are the cheap ones.")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        models.take(80).forEach { m -> Chip(m, m == model) { model = m } }
+                    }
                 }
             }
 
@@ -201,7 +245,7 @@ fun SettingsScreen(onClose: () -> Unit) {
                 if (st.garminLastSync.isNotBlank()) Muted("Last sync ${st.garminLastSync.take(16).replace('T', ' ')} UTC · ${st.garminStatus}")
                 diag?.let { d ->
                     Text(d, fontSize = 12.sp, lineHeight = 15.sp)
-                    TextButton(onClick = { clip.setText(AnnotatedString(d)); toast("Copied. Paste it to Claude if a number doesn’t fill in.") }) { Text("Copy this report") }
+                    TextButton(onClick = { clip.setText(AnnotatedString(d)); toast("Copied. Paste it to your AI if a number doesn’t fill in.") }) { Text("Copy this report") }
                 }
             }
 
@@ -216,9 +260,14 @@ fun SettingsScreen(onClose: () -> Unit) {
                     Text("Schedule notifications", modifier = Modifier.weight(1f))
                     Switch(checked = st.alerts, onCheckedChange = { v -> Repo.update { it.copy(settings = it.settings.copy(alerts = v)) } })
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("9:00 am nudge if no weigh-in", modifier = Modifier.weight(1f))
-                    Switch(checked = st.weighNudge, onCheckedChange = { v -> Repo.update { it.copy(settings = it.settings.copy(weighNudge = v)) } })
+                if (st.alerts) {
+                    Muted("Remind me about:")
+                    PlanLogic.REMIND_KINDS.forEach { (k, label) ->
+                        val on = k !in st.remindOff
+                        CheckRow(label, on) { v -> Repo.update { it.copy(settings = it.settings.copy(remindOff = if (v) it.settings.remindOff - k else (it.settings.remindOff + k).distinct())) } }
+                    }
+                    CheckRow("9:00 am nudge if no weigh-in", st.weighNudge) { v -> Repo.update { it.copy(settings = it.settings.copy(weighNudge = v)) } }
+                    Muted("Turned-off types still show on Today; they just won’t notify you.")
                 }
                 if (!Reminders.canExact(ctx) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     Muted("Reminders may arrive a few minutes late. Allow exact alarms to get them on the minute.")
@@ -230,6 +279,12 @@ fun SettingsScreen(onClose: () -> Unit) {
                     Reminders.notify(ctx, com.bulkplan.tracker.logic.PlanLogic.today(), ScheduleItem("test", "12:00", "task", "Test reminder", "Reminders are working."))
                     Reminders.schedule(ctx)
                 }) { Text("Send a test notification") }
+            }
+
+            Section("Optional tests") {
+                Muted("DEXA scans and bloodwork are optional. Unticked tests disappear from your checklist, milestones, measurements and the coach’s suggestions.")
+                CheckRow("DEXA body-composition scans", "dexa" !in st.skipTests) { v -> Repo.update { it.copy(settings = it.settings.copy(skipTests = if (v) it.settings.skipTests - "dexa" else (it.settings.skipTests + "dexa").distinct())) } }
+                CheckRow("Bloodwork", "blood" !in st.skipTests) { v -> Repo.update { it.copy(settings = it.settings.copy(skipTests = if (v) it.settings.skipTests - "blood" else (it.settings.skipTests + "blood").distinct())) } }
             }
 
             Section("Backup") {
@@ -250,5 +305,13 @@ fun SettingsScreen(onClose: () -> Unit) {
             }
             Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+@Composable
+private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = C.Blue, uncheckedColor = C.Muted))
+        Text(label, color = C.Text, fontSize = 15.sp)
     }
 }

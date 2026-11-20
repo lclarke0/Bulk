@@ -49,7 +49,12 @@ object Repo {
     fun init(context: Context) {
         if (loaded) return
         app = context.applicationContext
-        runCatching { if (stateFile().exists()) _state.value = json.decodeFromString(AppState.serializer(), stateFile().readText()) }
+        runCatching {
+            if (stateFile().exists()) {
+                val st = json.decodeFromString(AppState.serializer(), stateFile().readText())
+                _state.value = st.copy(plan = DefaultPlan.migrate(st.plan), changelog = st.changelog.map { c -> c.copy(before = c.before?.let(DefaultPlan::migrate)) })
+            }
+        }
         runCatching {
             if (logsFile().exists()) {
                 val obj = json.parseToJsonElement(logsFile().readText()).jsonObject
@@ -73,6 +78,7 @@ object Repo {
         save()
         if (old.plan.schedule != new.plan.schedule || old.plan.workouts != new.plan.workouts ||
             old.settings.alerts != new.settings.alerts || old.settings.weighNudge != new.settings.weighNudge ||
+            old.settings.remindOff != new.settings.remindOff ||
             old.plan.startDate != new.plan.startDate
         ) Reminders.schedule(app)
     }

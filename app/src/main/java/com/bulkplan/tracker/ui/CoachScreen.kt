@@ -60,7 +60,7 @@ import com.bulkplan.tracker.data.Proposal
 import com.bulkplan.tracker.data.Repo
 import com.bulkplan.tracker.logic.Coach
 import com.bulkplan.tracker.logic.PlanLogic
-import com.bulkplan.tracker.net.Claude
+import com.bulkplan.tracker.net.Ai
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -71,7 +71,7 @@ import java.time.LocalDateTime
 private fun coachLine(s: AppState, logs: Map<String, DayLog>): String {
     val p = s.plan; val t = PlanLogic.today(); val w = PlanLogic.weekOf(p, t)
     if (w < 1) {
-        val left = p.prep.count { s.prepDone[it.id] != true }
+        val left = PlanLogic.prepFor(p, s.settings).count { s.prepDone[it.id] != true }
         return "Your plan starts ${PlanLogic.fmtD(p.startDate)}." + if (left > 0) " $left thing${if (left == 1) "" else "s"} left on your before-week-1 list." else " You’re all set to start."
     }
     val days = (0..6).map { PlanLogic.addD(t, -it.toLong()) }
@@ -113,13 +113,13 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
     val toast = LocalToast.current
     val clip = LocalClipboardManager.current
     val msgs = state.coach.messages
-    val hasKey = state.settings.claudeKey.isNotBlank()
+    val hasKey = Ai.hasKey(state.settings)
 
     fun send(text: String) {
         if (text.isBlank() || busy) return
         if (!hasKey) {
             clip.setText(AnnotatedString(Coach.fullPrompt(state, logs, text)))
-            toast("No API key yet, so it’s copied. Paste it into a Claude chat.")
+            toast("No API key yet, so it’s copied. Paste it into any AI chat.")
             return
         }
         val first = msgs.none { it.role == "user" }
@@ -129,7 +129,7 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
         scope.launch {
             try {
                 val s = Repo.state.value
-                val reply = Claude.chat(s.settings.claudeKey, s.settings.claudeModel, s.coach.messages)
+                val reply = Ai.chat(s.settings, s.coach.messages)
                 val prop = Coach.parseProposal(reply)
                 Repo.update { it.copy(coach = it.coach.copy(messages = it.coach.messages + ChatMessage("assistant", reply), pending = prop ?: it.coach.pending)) }
             } catch (e: Exception) {
@@ -137,7 +137,7 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
                     val ms = st.coach.messages.toMutableList()
                     val i = ms.indexOfLast { it.role == "user" }
                     if (i >= 0) ms[i] = ms[i].copy(failed = true)
-                    st.copy(coach = st.coach.copy(messages = ms + ChatMessage("note", e.message ?: "Couldn’t reach Claude.")))
+                    st.copy(coach = st.coach.copy(messages = ms + ChatMessage("note", e.message ?: "Couldn’t reach the AI.")))
                 }
             }
             busy = false
@@ -163,7 +163,7 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
             Section("Weekly Check-In", icon = Ico.Calendar, iconTint = C.Blue, highlight = true, action = {
                 Icon(if (details) Ico.Up else Ico.Right, null, tint = C.BlueSoft, modifier = Modifier.size(24.dp).clickable { details = !details })
             }) {
-                if (next == null) Muted("There’s no weekly review on your schedule. Add one from Today › Add Task (type: Other), or start a check-in any time.")
+                if (next == null) Muted("There’s no weekly review on your schedule. Add one in Today › Edit (type: Coach check-in), or start a check-in any time.")
                 else {
                     Muted("Your next check-in is in:", size = 15)
                     val secs = Duration.between(now, next).seconds.coerceAtLeast(0)
@@ -191,7 +191,7 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
                 Spacer(Modifier.width(6.dp))
                 Text(if (hasKey) "Online" else "Not connected", color = if (hasKey) C.Green else C.Muted, fontSize = 14.sp)
             }) {
-                if (msgs.isEmpty()) Bubble(ChatMessage("assistant", if (hasKey) "Need help with your plan, meals or training? Ask me anything!" else "Add your Claude API key in Settings to chat here. Until then, anything you send is copied so you can paste it into a Claude chat."))
+                if (msgs.isEmpty()) Bubble(ChatMessage("assistant", if (hasKey) "Need help with your plan, meals or training? Ask me anything!" else "Add an AI API key in Settings › AI coach to chat here (Gemini and DeepSeek are cheap). Until then, anything you send is copied so you can paste it into any AI chat."))
                 msgs.forEach { Bubble(it) }
                 if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
                     CoachAvatar(36.dp); Spacer(Modifier.width(10.dp))
@@ -235,15 +235,15 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
         // Copy-paste fallback and change history
         item {
             Section("More", action = { TextButton(onClick = { more = !more }) { Text(if (more) "Hide" else "Show", color = C.BlueSoft) } }) {
-                Muted("Copy-and-paste check-in for any Claude chat, and the history of plan changes with undo.")
+                Muted("Copy-and-paste check-in for any AI chat, and the history of plan changes with undo.")
                 if (more) {
                     Text("Copy-and-paste check-in", style = H3)
-                    Muted("1) Copy the check-in and paste it into Claude. 2) Answer its questions there. 3) Paste Claude’s final reply (the one with the json block) below.")
+                    Muted("1) Copy the check-in and paste it into any AI chat. 2) Answer its questions there. 3) Paste its final reply (the one with the json block) below.")
                     PillButton("Copy check-in", Ico.Clipboard) {
                         clip.setText(AnnotatedString(Coach.fullPrompt(state, logs, Coach.STARTERS[0].second) + "\n\n(I’m using a tracker app. When we agree on changes, put them in the json block so I can paste your reply into the app.)"))
                         toast("Check-in copied")
                     }
-                    Field(paste, { paste = it }, "Paste Claude’s reply", Modifier.fillMaxWidth(), singleLine = false, minLines = 3)
+                    Field(paste, { paste = it }, "Paste the AI’s reply", Modifier.fillMaxWidth(), singleLine = false, minLines = 3)
                     Button(onClick = {
                         val p = Coach.parseProposal(paste)
                         if (p == null) toast("No change list found. Paste the reply that ends with the json block.")

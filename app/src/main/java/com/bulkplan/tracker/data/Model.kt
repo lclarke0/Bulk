@@ -47,10 +47,10 @@ data class ScheduleItem(
 )
 
 @Serializable
-data class PrepItem(val id: String, val text: String)
+data class PrepItem(val id: String, val text: String, /** "dexa" or "blood" for optional tests. */ val tag: String? = null)
 
 @Serializable
-data class Milestone(val week: Int, val text: String)
+data class Milestone(val week: Int, val text: String, val tag: String? = null)
 
 @Serializable
 data class Targets(
@@ -163,7 +163,7 @@ data class Change(
 data class Proposal(
     val summary: String = "Plan update",
     val changes: List<Change> = emptyList(),
-    val source: String = "Claude",
+    val source: String = "AI",
     val error: String? = null,
 )
 
@@ -198,6 +198,19 @@ data class Settings(
     val garminStatus: String = "",
     val usdaKey: String = "",
     val weighNudge: Boolean = true,
+    /** Which AI service the coach uses: gemini, openai, anthropic, deepseek, openrouter, mistral, custom. Blank = pick from older settings. */
+    val aiProvider: String = "",
+    /** API key per provider, so switching back and forth keeps each one. */
+    val aiKeys: Map<String, String> = emptyMap(),
+    val aiModels: Map<String, String> = emptyMap(),
+    /** Base URL for the "custom" OpenAI-compatible provider, ending in /v1. */
+    val aiBaseUrl: String = "",
+    /** Schedule kinds (meal, train, supp, skin, task, coach, sleep) with reminders turned off. */
+    val remindOff: List<String> = emptyList(),
+    /** Optional tests left out of the plan: "dexa", "blood". */
+    val skipTests: List<String> = emptyList(),
+    /** "" = intake not seen yet, "skipped", "pending" (request made, plan not imported), "done". */
+    val intakeStatus: String = "",
 )
 
 @Serializable
@@ -208,6 +221,8 @@ data class AppState(
     val coach: Coach = Coach(),
     val settings: Settings = Settings(),
     val savedFoods: List<SavedFood> = emptyList(),
+    /** Answers from the intake questionnaire, by question id. */
+    val intake: Map<String, String> = emptyMap(),
 )
 
 /** The web tracker's backup file: {"app":"bulkplan","v":1,"S":{...},"logs":{...}} */

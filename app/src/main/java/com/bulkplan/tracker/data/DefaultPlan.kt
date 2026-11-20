@@ -35,7 +35,7 @@ object DefaultPlan {
             Block(13, 17, "Specialize", "spec", "0–2", "+1 set for your weakest muscles (pick them in Settings)."),
             Block(18, 18, "Deload", "half", "3–4", "Half the sets at the same weights."),
             Block(19, 25, "New variations", "spec", "0–2", "Swap 1–2 exercises per day: same movement, different tool."),
-            Block(26, 26, "Deload + retest", "half", "3–4", "Half the sets. DEXA scan, bloodwork and photos this week."),
+            Block(26, 26, "Deload + retest", "half", "3–4", OLD_RETEST_NEW),
         ),
         workouts = linkedMapOf(
             "upper" to Workout("Upper", 1, listOf(
@@ -95,7 +95,7 @@ object DefaultPlan {
             ScheduleItem("caf", "14:30", "supp", "Caffeine", "100 mg: a small coffee or a caffeine pill. None after 3:00 pm.", TRAIN),
             ScheduleItem("snack-pm", "15:30", "meal", "Afternoon snack", "Beef jerky, a banana, a soft protein bar. Your pre-workout fuel on training days.", listOf(0, 1, 2, 3, 4, 5), protein = 15, kcal = 400),
             ScheduleItem("sat-snack", "15:30", "meal", "Afternoon snack", "Shelf-stable protein shake, 2 rice cakes with almond butter.", listOf(6), protein = 25, kcal = 450),
-            ScheduleItem("review", "17:00", "coach", "Weekly review with Claude", "Open Coach and start the weekly check-in.", listOf(0)),
+            ScheduleItem("review", "17:00", "coach", "Weekly review with your coach", "Open Coach and start the weekly check-in.", listOf(0)),
             ScheduleItem("train", "17:30", "train", "Train", "", TRAIN, dur = 90),
             ScheduleItem("walk", "17:30", "task", "30-minute walk", "Easy pace. It counts toward your steps.", listOf(3)),
             ScheduleItem("prep-sun", "18:00", "task", "Meal prep", "Cook and pack lunches for Mon–Wed.", listOf(0)),
@@ -108,8 +108,8 @@ object DefaultPlan {
             ScheduleItem("lights", "22:30", "sleep", "Lights out", "8 hours. Wake at 6:30.", ALL),
         ),
         prep = listOf(
-            PrepItem("blood", "Bloodwork: fasted, in the morning, before you start creatine, no hard lifting for 48 hours before"),
-            PrepItem("dexa", "DEXA scan for your starting lean mass and body fat"),
+            PrepItem("blood", "Bloodwork: fasted, in the morning, before you start creatine, no hard lifting for 48 hours before", "blood"),
+            PrepItem("dexa", "DEXA scan for your starting lean mass and body fat", "dexa"),
             PrepItem("bench", "Adjustable bench and cable attachments (D-handles, rope, straight bar, ankle strap)"),
             PrepItem("supps", "Creatine, protein powder and shelf-stable protein shakes"),
             PrepItem("skin", "Gentle cleanser, ceramide moisturizer, SPF 30+ sunscreen, niacinamide serum"),
@@ -120,8 +120,25 @@ object DefaultPlan {
             Milestone(12, "Deload week"),
             Milestone(18, "Deload week"),
             Milestone(19, "Swap 1–2 exercises per day"),
-            Milestone(26, "Deload, DEXA scan, repeat bloodwork, photos"),
+            Milestone(26, "Deload, photos and measurements"),
+            Milestone(26, "DEXA scan", "dexa"),
+            Milestone(26, "Repeat bloodwork", "blood"),
         ),
+    )
+
+    private const val OLD_RETEST = "Half the sets. DEXA scan, bloodwork and photos this week."
+    private const val OLD_RETEST_NEW = "Half the sets. Retest week: photos, measurements and any tests you chose."
+
+    /** Brings a plan saved by an older version of the app up to date. */
+    fun migrate(p: Plan): Plan = p.copy(
+        blocks = p.blocks.map { if (it.note == OLD_RETEST) it.copy(note = OLD_RETEST_NEW) else it },
+        schedule = p.schedule.map { if (it.id == "review" && it.title == "Weekly review with Claude") it.copy(title = "Weekly review with your coach") else it },
+        prep = p.prep.map { if (it.tag == null && (it.id == "dexa" || it.id == "blood")) it.copy(tag = it.id) else it },
+        milestones = p.milestones.flatMap {
+            if (it.text == "Deload, DEXA scan, repeat bloodwork, photos") listOf(
+                Milestone(it.week, "Deload, photos and measurements"), Milestone(it.week, "DEXA scan", "dexa"), Milestone(it.week, "Repeat bloodwork", "blood"),
+            ) else listOf(it)
+        },
     )
 
     val MUSCLES = listOf("chest", "back", "front delts", "side delts", "rear delts", "biceps", "triceps", "quads", "hamstrings", "calves", "traps", "abs")
