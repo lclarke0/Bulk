@@ -68,6 +68,7 @@ fun daysText(days: List<Int>): String = when {
     days.toSet() == (0..6).toSet() -> "Every day"
     days.toSet() == (1..5).toSet() -> "Weekdays"
     days.toSet() == setOf(0, 6) -> "Weekends"
+    days.toSet().size == 6 -> "Every day but " + PlanLogic.DAYS[(0..6).first { it !in days }]
     else -> WEEK.filter { it in days }.joinToString(", ") { PlanLogic.DAYS[it] }
 }
 
@@ -109,7 +110,6 @@ fun ScheduleScreen(onClose: () -> Unit) {
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(PlanLogic.DAYS[d].take(2), color = if (sel) Color.White else C.Text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                            Text("${plan.schedule.count { d in it.days }}", color = if (sel) Color.White else C.Muted, fontSize = 12.sp)
                         }
                     }
                 }
