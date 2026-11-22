@@ -35,9 +35,10 @@ object Garmin {
         val exp = p.getLong("exp", 0L)
         if (!force && cached != null && System.currentTimeMillis() < exp - 5 * 60_000) return cached
         val text = try {
-            Http.request(BASE + TOKEN_PATH, "POST", mapOf("Authorization" to "ApiKey ${apiKey.trim()}"), body = "")
+            // The token comes back as plain text, so accept anything (asking for JSON only gets HTTP 406).
+            Http.request(BASE + TOKEN_PATH, "POST", mapOf("Authorization" to "ApiKey ${apiKey.trim().replace(Regex("\\s"), "")}", "Accept" to "*/*"), body = "")
         } catch (e: HttpError) {
-            throw Exception(if (e.code == 401 || e.code == 403) "Garmin rejected the Personal API key. Make a new one and paste it in Settings." else "Garmin sign-in failed (HTTP ${e.code}).")
+            throw Exception(if (e.code == 401 || e.code == 403) "Garmin rejected the Personal API key. Make a new one and paste it in Settings." else if (e.code == 429) "Garmin is limiting sign-ins right now. Try again in a few minutes." else "Garmin sign-in failed (HTTP ${e.code}).")
         }
         val (tok, expMs) = parseToken(text)
         p.edit().putString("token", tok).putLong("exp", expMs).apply()
@@ -68,9 +69,9 @@ object Garmin {
 
     private suspend fun get(ctx: Context, apiKey: String, path: String): String {
         return try {
-            Http.request(BASE + path, headers = mapOf("Authorization" to "Bearer ${token(ctx, apiKey)}"))
+            Http.request(BASE + path, headers = mapOf("Authorization" to "Bearer ${token(ctx, apiKey)}", "Accept" to "application/json, */*"))
         } catch (e: HttpError) {
-            if (e.code == 401) Http.request(BASE + path, headers = mapOf("Authorization" to "Bearer ${token(ctx, apiKey, force = true)}")) else throw e
+            if (e.code == 401) Http.request(BASE + path, headers = mapOf("Authorization" to "Bearer ${token(ctx, apiKey, force = true)}", "Accept" to "application/json, */*")) else throw e
         }
     }
 
