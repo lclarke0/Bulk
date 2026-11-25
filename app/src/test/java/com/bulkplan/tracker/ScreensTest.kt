@@ -83,6 +83,8 @@ class ScreensTest {
     @Test fun workout() = shot("3-workout", "workout")
     @Test fun coach() = shot("4-coach", "coach")
     @Test fun progress() = shot("5-progress", "progress")
+    @Test fun chat() = shotOf("10-chat") { com.bulkplan.tracker.ui.ChatScreen({}, {}) }
+    @Test fun history() = shotOf("11-history") { com.bulkplan.tracker.ui.WorkoutHistoryScreen {} }
     @Test fun intake() = shotOf("6-intake", intake = "") { App("today") {} }
     @Test fun schedule() = shotOf("7-schedule") { com.bulkplan.tracker.ui.ScheduleScreen {} }
     @Test fun settings() = shotOf("8-settings") { com.bulkplan.tracker.ui.SettingsScreen({}) }

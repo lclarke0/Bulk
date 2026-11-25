@@ -62,6 +62,8 @@ fun ProgressScreen() {
     val t = PlanLogic.today()
     val toast = LocalToast.current
     var editDay by remember { mutableStateOf<String?>(null) }
+    var pickDay by remember { mutableStateOf(false) }
+    var stepDays by remember { mutableStateOf(30) }
     val a7 = PlanLogic.avgW(logs, addD(t, -6), t)
     val p7 = PlanLogic.avgW(logs, addD(t, -13), addD(t, -7))
     val last7 = (0..6).mapNotNull { logs[addD(t, -it.toLong())] }
@@ -87,6 +89,19 @@ fun ProgressScreen() {
             Section("Weight vs target pace") {
                 Muted("Dots: daily · blue line: 7-day average · dashes: target pace")
                 WeightChart(plan, logs)
+            }
+        }
+        item {
+            val pts = (stepDays - 1 downTo 0).map { addD(t, -it.toLong()) }.map { it to PlanLogic.stepsOf(logs[it]) }
+            val vals = pts.mapNotNull { it.second }
+            val hit = vals.count { it >= plan.targets.steps }
+            Section("Steps per day", icon = Ico.Chart) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(14, 30, 90).forEach { n -> Chip("$n days", stepDays == n) { stepDays = n } }
+                }
+                Muted(if (vals.isEmpty()) "No steps logged yet. Garmin fills these in, or type them on Today."
+                    else "Average ${fmtN(Math.rint(vals.average()))} · target ${fmtN(plan.targets.steps.toDouble())} hit on $hit of ${vals.size} days · green bars hit it")
+                StepsChart(pts, plan.targets.steps.toDouble())
             }
         }
         item {
@@ -121,7 +136,10 @@ fun ProgressScreen() {
         }
         item {
             Section("Last 14 days") {
-                Muted("Tap a day to fix its numbers.")
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Muted("Tap a day to fix its numbers.", Modifier.weight(1f))
+                    TextButton(onClick = { pickDay = true }) { Text("Older day…", color = C.BlueSoft) }
+                }
                 Row {
                     listOf("Day" to 1.4f, "Weight" to 1f, "Calories" to 1f, "Protein" to 1f, "Sleep" to .8f).forEach { (h, wt) ->
                         Text(h, modifier = Modifier.weight(wt), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -154,6 +172,7 @@ fun ProgressScreen() {
     }
 
     editDay?.let { d -> DayEditor(d) { editDay = null } }
+    if (pickDay) DateDialog(addD(t, -14), onDismiss = { pickDay = false }) { d -> pickDay = false; editDay = d }
 }
 
 @Composable
@@ -217,6 +236,45 @@ private fun WeightChart(plan: Plan, logs: Map<String, DayLog>) {
         if (pts.isEmpty()) {
             paint.textAlign = Paint.Align.CENTER; paint.textSize = 14.sp.toPx()
             drawContext.canvas.nativeCanvas.drawText("Log your morning weight to start the line", (size.width + left) / 2, size.height / 2, paint)
+        }
+    }
+}
+
+/** Bars for daily steps, green on days that hit the target, with a dashed target line. */
+@Composable
+private fun StepsChart(pts: List<Pair<String, Double?>>, target: Double) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    val grid = MaterialTheme.colorScheme.outline
+    val hitC = C.Green; val missC = C.Blue
+    Canvas(Modifier.fillMaxWidth().height(200.dp)) {
+        val left = 44.dp.toPx(); val right = 8.dp.toPx(); val top = 8.dp.toPx(); val bottom = 24.dp.toPx()
+        val maxV = (pts.mapNotNull { it.second } + target).max()
+        val hi = (ceil(maxV / 2000.0) * 2000.0).coerceAtLeast(2000.0)
+        fun y(v: Double) = (top + (1 - v / hi) * (size.height - top - bottom)).toFloat()
+        val paint = Paint().apply { color = ink.toArgb(); textSize = 11.sp.toPx(); isAntiAlias = true }
+        val stepV = if (hi > 16000) 5000.0 else 2000.0
+        var v = 0.0
+        while (v <= hi + 1) {
+            drawLine(grid, Offset(left, y(v)), Offset(size.width - right, y(v)), 1f)
+            paint.textAlign = Paint.Align.RIGHT
+            drawContext.canvas.nativeCanvas.drawText(if (v >= 1000) "${(v / 1000).roundToInt()}k" else "0", left - 6.dp.toPx(), y(v) + 4.dp.toPx(), paint)
+            v += stepV
+        }
+        val n = pts.size.coerceAtLeast(1)
+        val slot = (size.width - left - right) / n
+        val bw = (slot * 0.7f).coerceAtLeast(1.5f)
+        pts.forEachIndexed { i, (_, s) ->
+            if (s == null || s <= 0) return@forEachIndexed
+            val x = left + slot * i + (slot - bw) / 2
+            drawRect(if (s >= target) hitC else missC, Offset(x, y(s)), androidx.compose.ui.geometry.Size(bw, y(0.0) - y(s)))
+        }
+        drawLine(ink, Offset(left, y(target)), Offset(size.width - right, y(target)), 1.5.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f)))
+        listOf(0, n / 2, n - 1).distinct().forEachIndexed { k, i ->
+            val ld = PlanLogic.date(pts.getOrNull(i)?.first ?: return@forEachIndexed)
+            paint.textAlign = when (k) { 0 -> Paint.Align.LEFT; 2 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
+            val x = when (k) { 0 -> left; 2 -> size.width - right; else -> left + slot * i + slot / 2 }
+            drawContext.canvas.nativeCanvas.drawText("${ld.month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${ld.dayOfMonth}", x, size.height - 4.dp.toPx(), paint)
         }
     }
 }

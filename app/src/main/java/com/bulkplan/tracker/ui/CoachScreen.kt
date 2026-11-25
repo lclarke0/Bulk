@@ -2,6 +2,25 @@
 
 package com.bulkplan.tracker.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import com.bulkplan.tracker.logic.CoachChat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -102,8 +121,6 @@ private fun nextCheckIn(s: AppState): LocalDateTime? {
 fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
     val state by Repo.state.collectAsStateWithLifecycle()
     val logs by Repo.logs.collectAsStateWithLifecycle()
-    var busy by remember { mutableStateOf(false) }
-    var input by remember { mutableStateOf("") }
     var details by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
     var paste by remember { mutableStateOf("") }
@@ -115,33 +132,17 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
     val msgs = state.coach.messages
     val hasKey = Ai.hasKey(state.settings)
 
+    val busy by CoachChat.busy.collectAsStateWithLifecycle()
+
+    /** Sends a message and opens the chat page, or copies the prompt when no key is set. */
     fun send(text: String) {
         if (text.isBlank() || busy) return
-        if (!hasKey) {
+        if (!CoachChat.send(text)) {
             clip.setText(AnnotatedString(Coach.fullPrompt(state, logs, text)))
             toast("No API key yet, so it’s copied. Paste it into any AI chat.")
             return
         }
-        val um = ChatMessage("user", text, display = text)
-        Repo.update { it.copy(coach = it.coach.copy(messages = it.coach.messages + um)) }
-        busy = true
-        scope.launch {
-            try {
-                val s = Repo.state.value
-                // Fresh plan and logs go with every message as the system prompt.
-                val reply = Ai.chat(s.settings, s.coach.messages, system = Coach.systemPrompt(s, Repo.logs.value))
-                val prop = Coach.parseProposal(reply)
-                Repo.update { it.copy(coach = it.coach.copy(messages = it.coach.messages + ChatMessage("assistant", reply), pending = prop ?: it.coach.pending)) }
-            } catch (e: Exception) {
-                Repo.update { st ->
-                    val ms = st.coach.messages.toMutableList()
-                    val i = ms.indexOfLast { it.role == "user" }
-                    if (i >= 0) ms[i] = ms[i].copy(failed = true)
-                    st.copy(coach = st.coach.copy(messages = ms + ChatMessage("note", e.message ?: "Couldn’t reach the AI.")))
-                }
-            }
-            busy = false
-        }
+        onGo("chat")
     }
 
     LazyColumn(contentPadding = PaddingValues(16.dp)) {
@@ -184,31 +185,19 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
                 }
             }
         }
-        // Chat
+        // Chat preview: the full conversation lives on its own page.
         item {
             Section("Chat with Your Coach", icon = Ico.Coach, action = {
                 Box(Modifier.size(9.dp).clip(CircleShape).background(if (hasKey) C.Green else C.Muted))
                 Spacer(Modifier.width(6.dp))
                 Text(if (hasKey) "Online" else "Not connected", color = if (hasKey) C.Green else C.Muted, fontSize = 14.sp)
             }) {
-                if (msgs.isEmpty()) Bubble(ChatMessage("assistant", if (hasKey) "Need help with your plan, meals or training? Ask me anything!" else "Add an AI API key in Settings › AI coach to chat here (Gemini and DeepSeek are cheap). Until then, anything you send is copied so you can paste it into any AI chat."))
-                msgs.forEach { Bubble(it) }
-                if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
-                    CoachAvatar(36.dp); Spacer(Modifier.width(10.dp))
-                    CircularProgressIndicator(Modifier.size(18.dp), color = C.Blue, strokeWidth = 2.dp); Muted("  Thinking…")
-                }
-                state.coach.pending?.let { ProposalCard(it) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(input, { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Type a message…") },
-                        shape = RoundedCornerShape(28.dp), colors = fieldColors(), enabled = !busy, maxLines = 5)
-                    Spacer(Modifier.width(10.dp))
-                    Box(Modifier.size(56.dp).clip(CircleShape).background(if (input.isNotBlank() && !busy) C.Blue else C.BlueTint)
-                        .clickable(enabled = input.isNotBlank() && !busy) { val v = input; input = ""; send(v) },
-                        contentAlignment = Alignment.Center) { Icon(Ico.Send, "Send", tint = Color.White, modifier = Modifier.size(26.dp)) }
-                }
-                if (msgs.isNotEmpty()) TextButton(onClick = { Repo.update { it.copy(coach = it.coach.copy(messages = emptyList(), pending = null)) } }) {
-                    Text("Start a new conversation", color = C.Muted)
-                }
+                val recent = msgs.filter { it.role != "note" }.takeLast(2)
+                if (recent.isEmpty()) Bubble(ChatMessage("assistant", if (hasKey) "Need help with your plan, meals or training? Ask me anything!" else "Add an AI API key in Settings › AI coach to chat here (Gemini and DeepSeek are cheap). Until then, anything you send is copied so you can paste it into any AI chat."), preview = true)
+                recent.forEach { Bubble(it, preview = true) }
+                if (busy) Muted("Your coach is typing…")
+                if (state.coach.pending != null) Tag("Plan changes are waiting for your OK")
+                AddButton(if (msgs.isEmpty()) "Start a chat" else "Open chat", icon = Ico.Chat) { onGo("chat") }
                 if (!hasKey) TextButton(onClick = onOpenSettings) { Text("Add API key in Settings", color = C.BlueSoft) }
             }
         }
@@ -247,7 +236,7 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
                     Button(onClick = {
                         val p = Coach.parseProposal(paste)
                         if (p == null) toast("No change list found. Paste the reply that ends with the json block.")
-                        else { Repo.update { it.copy(coach = it.coach.copy(pending = p.copy(source = "pasted reply"))) }; paste = ""; toast("Changes are waiting in the chat above") }
+                        else { Repo.update { it.copy(coach = it.coach.copy(pending = p.copy(source = "pasted reply"))) }; paste = ""; onGo("chat") }
                     }) { Text("Read changes") }
                     HorizontalDivider(color = C.Line)
                     ChangeLog(state.changelog)
@@ -268,23 +257,143 @@ private fun QuickAction(label: String, icon: ImageVector, modifier: Modifier, on
     }
 }
 
+/** Light markdown: **bold**, # headings and - bullets, which is what AI replies mostly use. */
+private fun md(text: String): AnnotatedString = buildAnnotatedString {
+    val lines = text.trim().lines()
+    lines.forEachIndexed { li, raw ->
+        var line = raw.trimEnd()
+        val heading = Regex("^#{1,6}\\s+").find(line)
+        if (heading != null) line = line.removeRange(heading.range)
+        Regex("^(\\s*)[-*•]\\s+").find(line)?.let { line = it.groupValues[1] + "•  " + line.substring(it.range.last + 1) }
+        if (heading != null) pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+        var rest = line
+        while (true) {
+            val i = rest.indexOf("**"); if (i < 0) break
+            val j = rest.indexOf("**", i + 2); if (j < 0) break
+            append(rest.substring(0, i))
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(rest.substring(i + 2, j)) }
+            rest = rest.substring(j + 2)
+        }
+        append(rest)
+        if (heading != null) pop()
+        if (li < lines.size - 1) append("\n")
+    }
+}
+
 @Composable
-private fun Bubble(m: ChatMessage) {
+private fun Bubble(m: ChatMessage, preview: Boolean = false) {
+    val maxW = if (preview) 290.dp else 320.dp
     when (m.role) {
         "user" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Text((m.display ?: m.content) + if (m.failed == true) "\n(not sent)" else "", color = Color.White, fontSize = 16.sp, lineHeight = 22.sp,
-                modifier = Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)).background(C.Blue).padding(12.dp))
+            Text((m.display ?: m.content).let { if (preview && it.length > 160) it.take(160) + "…" else it } + if (m.failed == true) "\n(not sent)" else "",
+                color = Color.White, fontSize = 16.sp, lineHeight = 22.sp,
+                modifier = Modifier.widthIn(max = maxW).clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)).background(C.Blue).padding(12.dp))
         }
         "note" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text(m.content, color = C.Green, fontSize = 13.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(C.Green.copy(alpha = .12f)).padding(horizontal = 10.dp, vertical = 6.dp))
+            val bad = m.content.startsWith("Applied") || m.content.startsWith("Undid")
+            Text(m.content, color = if (bad) C.Green else C.Yellow, fontSize = 13.sp,
+                modifier = Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(10.dp)).background((if (bad) C.Green else C.Yellow).copy(alpha = .12f)).padding(horizontal = 10.dp, vertical = 6.dp))
         }
         else -> Row(verticalAlignment = Alignment.Top) {
-            CoachAvatar(40.dp)
+            CoachAvatar(if (preview) 40.dp else 34.dp)
             Spacer(Modifier.width(10.dp))
-            Text(Coach.stripJson(m.content).replace("**", ""), color = C.Text, fontSize = 16.sp, lineHeight = 22.sp,
-                modifier = Modifier.widthIn(max = 290.dp).clip(RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)).background(C.CardHi).padding(12.dp))
+            val body = Coach.stripJson(m.content).let { if (preview && it.length > 220) it.take(220).trimEnd() + "…" else it }
+            SelectionContainer {
+                Text(md(body), color = C.Text, fontSize = 16.sp, lineHeight = 23.sp,
+                    modifier = Modifier.widthIn(max = maxW).clip(RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)).background(C.CardHi).padding(12.dp))
+            }
         }
     }
+}
+
+/** Full-screen chat, like a messaging app: newest message at the bottom, input pinned below. */
+@Composable
+fun ChatScreen(onClose: () -> Unit, onOpenSettings: () -> Unit) {
+    BackHandler(onBack = onClose)
+    val state by Repo.state.collectAsStateWithLifecycle()
+    val busy by CoachChat.busy.collectAsStateWithLifecycle()
+    val msgs = state.coach.messages
+    val hasKey = Ai.hasKey(state.settings)
+    var input by rememberSaveable { mutableStateOf("") }
+    var menu by remember { mutableStateOf(false) }
+    val list = rememberLazyListState()
+    LaunchedEffect(msgs.size, busy, state.coach.pending) { list.animateScrollToItem(0) }
+    fun go(text: String) { if (text.isNotBlank() && !busy && CoachChat.send(text)) input = "" }
+
+    Scaffold(
+        containerColor = C.Bg,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CoachAvatar(36.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("AI Coach", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text(if (busy) "typing…" else if (hasKey) "${Ai.label(state.settings)} · ${Ai.cfg(state.settings).model}" else "Not connected",
+                                fontSize = 12.sp, color = if (busy || hasKey) C.Green else C.Muted, maxLines = 1)
+                        }
+                    }
+                },
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = {
+                    TextButton(enabled = msgs.isNotEmpty() && !busy, onClick = { menu = true }) { Text("New chat", color = C.BlueSoft) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = C.Card),
+            )
+        },
+        bottomBar = {
+            Row(Modifier.fillMaxWidth().background(C.Card).navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(input, { input = it }, modifier = Modifier.weight(1f),
+                    placeholder = { Text(if (hasKey) "Message your coach…" else "Add an API key to chat") },
+                    shape = RoundedCornerShape(24.dp), colors = fieldColors(), enabled = hasKey, maxLines = 6)
+                Spacer(Modifier.width(8.dp))
+                val can = input.isNotBlank() && !busy && hasKey
+                Box(Modifier.size(52.dp).clip(CircleShape).background(if (can) C.Blue else C.BlueTint).clickable(enabled = can) { go(input) },
+                    contentAlignment = Alignment.Center) { Icon(Ico.Send, "Send", tint = Color.White, modifier = Modifier.size(24.dp)) }
+            }
+        },
+    ) { pad ->
+        LazyColumn(
+            state = list, reverseLayout = true,
+            modifier = Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // reverseLayout: the first item here sits at the bottom, just above the input.
+            if (busy) item(key = "busy") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CoachAvatar(34.dp); Spacer(Modifier.width(10.dp))
+                    CircularProgressIndicator(Modifier.size(18.dp), color = C.Blue, strokeWidth = 2.dp); Muted("  Thinking…")
+                }
+            }
+            if (!busy && CoachChat.lastFailed(msgs)) item(key = "retry") {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    PillButton("Try again", Ico.Sync) { CoachChat.retry() }
+                }
+            }
+            state.coach.pending?.let { p -> item(key = "pending") { ProposalCard(p) } }
+            itemsIndexed(msgs.asReversed(), key = { i, _ -> "m${msgs.size - i}" }) { _, m -> Bubble(m) }
+            if (msgs.isEmpty()) item(key = "welcome") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Bubble(ChatMessage("assistant", if (hasKey) "Hey${state.settings.name.takeIf { it.isNotBlank() }?.let { " $it" } ?: ""}! I can see your plan, food log, weights, sleep, steps and lifts. What do you want to work on?"
+                        else "Add an AI API key in Settings › AI coach and I can chat here with your real numbers."))
+                    if (hasKey) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Coach.STARTERS.forEach { (label, ask) -> Chip(label, false) { go(ask) } }
+                    } else Button(onClick = onOpenSettings) { Text("Open Settings") }
+                }
+            }
+        }
+    }
+    if (menu) AlertDialog(
+        onDismissRequest = { menu = false },
+        containerColor = C.Card,
+        title = { Text("Start a new chat?", color = C.Text) },
+        text = { Text("Clears this conversation. Your plan, logs and applied changes stay, and the coach still sees all your data.", color = C.Text) },
+        confirmButton = { Button(onClick = { Repo.update { it.copy(coach = it.coach.copy(messages = emptyList(), pending = null)) }; menu = false }) { Text("New chat") } },
+        dismissButton = { TextButton(onClick = { menu = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable

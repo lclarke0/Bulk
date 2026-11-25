@@ -87,7 +87,7 @@ private fun muscleColor(m: String): Color = when (m) {
 }
 
 @Composable
-fun WorkoutScreen() {
+fun WorkoutScreen(onHistory: () -> Unit = {}) {
     val state by Repo.state.collectAsStateWithLifecycle()
     val logs by Repo.logs.collectAsStateWithLifecycle()
     val plan = state.plan
@@ -128,6 +128,10 @@ fun WorkoutScreen() {
 
     LazyColumn(contentPadding = PaddingValues(16.dp)) {
         item {
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Today’s session", style = H2, modifier = Modifier.weight(1f))
+                PillButton("History", Ico.Calendar, onClick = onHistory)
+            }
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 keys.forEach { k ->
                     val wo = plan.workouts.getValue(k)

@@ -237,6 +237,28 @@ private fun ShiftDialog(day: Int, onDismiss: () -> Unit) {
     if (picking) TimeDialog(fromTime, onDismiss = { picking = false }) { fromTime = it; picking = false }
 }
 
+/** Calendar date picker that returns "YYYY-MM-DD". Future dates are blocked unless [allowFuture]. */
+@Composable
+fun DateDialog(date: String, onDismiss: () -> Unit, allowFuture: Boolean = false, onPick: (String) -> Unit) {
+    val init = runCatching { java.time.LocalDate.parse(date).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli() }.getOrNull()
+    val today = java.time.LocalDate.now().atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    val st = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = init,
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = allowFuture || utcTimeMillis <= today
+        },
+    )
+    androidx.compose.material3.DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(enabled = st.selectedDateMillis != null, onClick = {
+                st.selectedDateMillis?.let { ms -> onPick(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()) }
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) { androidx.compose.material3.DatePicker(st) }
+}
+
 /** Clock-face time picker that returns "HH:MM". */
 @Composable
 fun TimeDialog(time: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
