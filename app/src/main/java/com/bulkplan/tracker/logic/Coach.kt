@@ -85,12 +85,19 @@ Rules for changes: op is "set", "add" or "remove". path is an array of keys into
             }
         }
         val cr = PlanLogic.calorieRule(p, logs)
+        val todayLog = logs[t]
         val status = if (w < 1) "Plan has not started yet (${diffD(t, p.startDate)} days to go)."
         else "Week $w of ${p.weeks}" + (b?.let { ", block \"${it.name}\": ${it.note} Effort ${it.rir} reps short of failure." } ?: "")
         return """TODAY: $t (${PlanLogic.DAYN[PlanLogic.dow(t)]}). Plan start ${p.startDate}. $status
 CURRENT 7-DAY AVERAGE WEIGHT: ${String.format(Locale.US, "%.1f", PlanLogic.curWeight(p, logs))} lb. Protein target ${PlanLogic.proteinTarget(p, logs)} g. Calorie target ${p.targets.calories}.
 APP'S CALORIE RULE CHECK: ${cr.text}
 PRE-START CHECKLIST: ${PlanLogic.prepFor(p, s.settings).joinToString("; ") { (if (s.prepDone[it.id] == true) "[done] " else "[ ] ") + it.text }}
+${about(s)}
+TODAY'S SCHEDULE (now ${PlanLogic.fmtT("%02d:%02d".format(PlanLogic.nowMins() / 60, PlanLogic.nowMins() % 60))}):
+${todayLog.let { g -> PlanLogic.itemsFor(p, t).joinToString("\n") { i -> "- ${PlanLogic.fmtT(i.time)} ${i.title}" + (if (g?.checks?.get(i.id) == true) " [done]" else "") } }}
+
+TODAY'S FOOD LOG:
+${todayLog?.foods?.joinToString("\n") { f -> "- ${f.meal}: ${f.name} (${fmtN(f.kcal)} kcal, ${fmtN(f.protein)} g protein, ${fmtN(f.carbs)} g carbs, ${fmtN(f.fat)} g fat)" }?.takeIf { it.isNotBlank() } ?: "(nothing logged yet today)"}
 
 DAILY LOG, LAST 21 DAYS:
 ${days.joinToString("\n").ifEmpty { "(nothing logged yet)" }}
@@ -103,6 +110,21 @@ RECENT PLAN CHANGES: ${s.changelog.takeLast(5).joinToString("; ") { it.at.take(1
 PLAN (JSON):
 ${Repo.json.encodeToString(Plan.serializer(), p)}"""
     }
+
+    /** Intake answers worth knowing every time (age, height, schedule, food limits). */
+    private fun about(s: AppState): String {
+        val keys = listOf("age", "sex", "height", "experience", "injuries", "work", "workFood", "diet", "allergies", "dislikes", "favorites", "appetite", "budget", "other")
+        val parts = keys.mapNotNull { k ->
+            val v = s.intake[k]?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            (Intake.ALL.firstOrNull { it.id == k }?.label ?: k) + ": " + v.replace(Regex("\\s+"), " ")
+        }
+        return if (parts.isEmpty()) "" else "ABOUT THEM (intake answers): " + parts.joinToString("; ") + "\n"
+    }
+
+    /** Rules plus everything the app knows, sent fresh with every coach message. */
+    fun systemPrompt(s: AppState, logs: Map<String, DayLog>) =
+        rules(s.plan, s.settings.skipTests) + "\n\nThe app attaches the person's current data below on every message, so it is always up to date. " +
+            "Use it directly: never say you can't see their data or ask them to paste numbers that are already here.\n\n" + context(s, logs)
 
     fun fullPrompt(s: AppState, logs: Map<String, DayLog>, ask: String) = rules(s.plan, s.settings.skipTests) + "\n\n" + context(s, logs) + "\n\n---\n" + ask
 

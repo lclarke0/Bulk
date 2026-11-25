@@ -214,4 +214,21 @@ Sure — here's your plan.
         val ds = com.bulkplan.tracker.net.Ai.cfg(com.bulkplan.tracker.data.Settings(aiProvider = "deepseek", aiKeys = mapOf("deepseek" to "k")))
         assertEquals("https://api.deepseek.com", ds.base); assertEquals("deepseek-chat", ds.model)
     }
+
+    @Test fun coachSendsWhatYouTypedAndFreshDataAsSystem() {
+        val old = listOf(
+            com.bulkplan.tracker.data.ChatMessage("user", "RULES...PLAN JSON...\n---\nhi", display = "hi", failed = true),
+            com.bulkplan.tracker.data.ChatMessage("note", "Couldn't reach the AI."),
+            com.bulkplan.tracker.data.ChatMessage("user", "how am I doing?", display = "how am I doing?"),
+        )
+        assertEquals(listOf("user" to "how am I doing?"), com.bulkplan.tracker.net.Ai.prepare(old))
+        val t = PlanLogic.today()
+        val st = AppState(plan = DefaultPlan.create("2026-11-23"), intake = mapOf("age" to "26", "height" to "6'0\""))
+        val logs = mapOf(t to DayLog(t, weight = 176.0, foods = listOf(FoodEntry("1", "Bagel", 300.0, 10.0, 55.0, 4.0, "Breakfast"))))
+        val sys = Coach.systemPrompt(st, logs)
+        assertTrue(sys.contains("Bagel (300 kcal"))
+        assertTrue(sys.contains("Age: 26"))
+        assertTrue(sys.contains("PLAN (JSON)"))
+        assertTrue(sys.contains("wt 176"))
+    }
 }

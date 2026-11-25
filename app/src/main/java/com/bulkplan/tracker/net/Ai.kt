@@ -96,17 +96,18 @@ object Ai {
     }
 
     /** Sends a conversation. Each message's content is a plain string or a list of parts (text and images). */
-    private suspend fun send(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int): String {
+    private suspend fun send(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int, system: String? = null): String {
         if (c.key.isBlank() && !(c.p.id == "custom" && c.base.isNotBlank())) throw NoKey()
         if (c.base.isBlank()) throw Exception("Add the base URL for your AI service in Settings › AI coach.")
         if (c.model.isBlank()) throw Exception("Pick a model in Settings › AI coach (tap Load models).")
-        return if (c.p.anthropic) sendAnthropic(c, messages, maxTokens, timeoutMs) else sendOpenAi(c, messages, maxTokens, timeoutMs)
+        return if (c.p.anthropic) sendAnthropic(c, messages, maxTokens, timeoutMs, system) else sendOpenAi(c, messages, maxTokens, timeoutMs, system)
     }
 
-    private suspend fun sendAnthropic(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int): String {
+    private suspend fun sendAnthropic(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int, system: String?): String {
         val body = buildJsonObject {
             put("model", c.model)
             put("max_tokens", maxTokens)
+            if (!system.isNullOrBlank()) put("system", system)
             put("messages", buildJsonArray {
                 messages.forEach { (role, content) ->
                     add(buildJsonObject { put("role", role); put("content", toAnthropicContent(content)) })
@@ -148,7 +149,7 @@ object Ai {
         }
     }
 
-    private suspend fun sendOpenAi(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int): String {
+    private suspend fun sendOpenAi(c: Cfg, messages: List<Pair<String, JsonElement>>, maxTokens: Int, timeoutMs: Int, system: String?): String {
         // OpenAI's newer models only accept max_completion_tokens; most other services want max_tokens.
         var tokenParam = if (c.p.id == "openai") "max_completion_tokens" else "max_tokens"
         val headers = buildMap {
@@ -161,6 +162,7 @@ object Ai {
                 put("model", c.model)
                 put(tokenParam, maxTokens)
                 put("messages", buildJsonArray {
+                    if (!system.isNullOrBlank()) add(buildJsonObject { put("role", "system"); put("content", system) })
                     messages.forEach { (role, content) -> add(buildJsonObject { put("role", role); put("content", content) }) }
                 })
             }
@@ -190,23 +192,30 @@ object Ai {
 
     // ---------- features ----------
 
-    /** Coach conversation. Messages must alternate and end on a user turn. */
-    suspend fun chat(s: Settings, messages: List<ChatMessage>): String = chat(cfg(s), messages)
+    /**
+     * Coach conversation. [system] carries the coaching rules plus a fresh copy of your
+     * plan and logs on every call, so the coach always sees current data.
+     */
+    suspend fun chat(s: Settings, messages: List<ChatMessage>, system: String? = null): String = chat(cfg(s), messages, system)
 
-    suspend fun chat(c: Cfg, messages: List<ChatMessage>, maxTokens: Int = 4000, timeoutMs: Int = 180_000): String {
-        val clean = mutableListOf<ChatMessage>()
-        for (m in messages.filter { (it.role == "user" || it.role == "assistant") && it.failed != true && it.content.isNotBlank() }) {
-            if (clean.isNotEmpty() && clean.last().role == m.role) clean[clean.size - 1] = clean.last().copy(content = clean.last().content + "\n\n" + m.content)
-            else clean += m
+    suspend fun chat(c: Cfg, messages: List<ChatMessage>, system: String? = null, maxTokens: Int = 4000, timeoutMs: Int = 180_000): String =
+        send(c, prepare(messages).map { it.first to JsonPrimitive(it.second) }, maxTokens, timeoutMs, system)
+
+    /**
+     * Turns the stored chat into alternating user/assistant turns that end on a user turn.
+     * User turns use what you typed (older versions stored the whole data dump in the first one).
+     */
+    internal fun prepare(messages: List<ChatMessage>, keep: Int = 30): List<Pair<String, String>> {
+        val clean = mutableListOf<Pair<String, String>>()
+        for (m in messages.filter { (it.role == "user" || it.role == "assistant") && it.failed != true }) {
+            val text = (if (m.role == "user") m.display ?: m.content else m.content).trim()
+            if (text.isBlank()) continue
+            if (clean.isNotEmpty() && clean.last().first == m.role) clean[clean.size - 1] = m.role to (clean.last().second + "\n\n" + text)
+            else clean += m.role to text
         }
-        while (clean.isNotEmpty() && clean.first().role != "user") clean.removeAt(0)
-        // Keep the first message (it carries the plan and logs) plus the recent turns.
-        val trimmed = if (clean.size > 21) {
-            var tail = clean.drop(1).takeLast(20)
-            while (tail.isNotEmpty() && tail.first().role != "assistant") tail = tail.drop(1)
-            listOf(clean.first()) + tail
-        } else clean
-        return send(c, trimmed.map { it.role to JsonPrimitive(it.content) }, maxTokens, timeoutMs)
+        var tail = clean.takeLast(keep)
+        while (tail.isNotEmpty() && tail.first().first != "user") tail = tail.drop(1)
+        return tail
     }
 
     /** One long request, used to build a whole plan from the intake document. */

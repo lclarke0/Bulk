@@ -122,14 +122,14 @@ fun CoachScreen(onOpenSettings: () -> Unit, onGo: (String) -> Unit) {
             toast("No API key yet, so it’s copied. Paste it into any AI chat.")
             return
         }
-        val first = msgs.none { it.role == "user" }
-        val um = ChatMessage("user", if (first) Coach.fullPrompt(state, logs, text) else text, display = text)
+        val um = ChatMessage("user", text, display = text)
         Repo.update { it.copy(coach = it.coach.copy(messages = it.coach.messages + um)) }
         busy = true
         scope.launch {
             try {
                 val s = Repo.state.value
-                val reply = Ai.chat(s.settings, s.coach.messages)
+                // Fresh plan and logs go with every message as the system prompt.
+                val reply = Ai.chat(s.settings, s.coach.messages, system = Coach.systemPrompt(s, Repo.logs.value))
                 val prop = Coach.parseProposal(reply)
                 Repo.update { it.copy(coach = it.coach.copy(messages = it.coach.messages + ChatMessage("assistant", reply), pending = prop ?: it.coach.pending)) }
             } catch (e: Exception) {
