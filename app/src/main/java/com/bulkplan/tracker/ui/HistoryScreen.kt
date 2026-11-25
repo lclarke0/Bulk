@@ -118,7 +118,7 @@ fun WorkoutHistoryScreen(onClose: () -> Unit) {
                         Icon(Ico.Edit, "Edit", tint = C.Muted, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.height(6.dp))
-                    Text("${logged.size} exercises · $sets sets · ${fmtN(Math.rint(volume))} lb volume", color = C.Text, fontSize = 14.sp)
+                    Text("${logged.size} exercise${if (logged.size == 1) "" else "s"} · $sets set${if (sets == 1) "" else "s"} · ${fmtN(Math.rint(volume))} lb volume", color = C.Text, fontSize = 14.sp)
                     val top = logged.entries.take(3).joinToString(" · ") { (id, list) ->
                         val best = list.filterNotNull().filter { it.w != null && it.r != null }.maxByOrNull { PlanLogic.e1rm(it.w!!, it.r!!) }
                         exName(plan, id) + (best?.let { " ${fmtN(it.w)}×${fmtN(it.r)}" } ?: "")

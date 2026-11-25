@@ -359,7 +359,8 @@ fun ChatScreen(onClose: () -> Unit, onOpenSettings: () -> Unit) {
             state = list, reverseLayout = true,
             modifier = Modifier.fillMaxSize().padding(pad),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            // Bottom-anchored so a short chat sits just above the input, like a messaging app.
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
         ) {
             // reverseLayout: the first item here sits at the bottom, just above the input.
             if (busy) item(key = "busy") {
