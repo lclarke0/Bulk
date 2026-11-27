@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -70,7 +71,7 @@ private fun workoutLabel(plan: Plan, l: DayLog): String =
 
 /** Past workouts. Tap one to fix weights and reps, delete sets, or delete the whole session. */
 @Composable
-fun WorkoutHistoryScreen(onClose: () -> Unit) {
+fun WorkoutHistoryScreen(onClose: () -> Unit, onGarmin: () -> Unit = {}) {
     val state by Repo.state.collectAsStateWithLifecycle()
     val logs by Repo.logs.collectAsStateWithLifecycle()
     val plan = state.plan
@@ -96,7 +97,8 @@ fun WorkoutHistoryScreen(onClose: () -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp)) {
             item {
                 Muted("Tap a session to fix a weight or rep count, delete a set, or delete the whole workout.", Modifier.padding(bottom = 12.dp))
-                AddButton("Log a past workout", Modifier.padding(bottom = 16.dp)) { picking = true }
+                AddButton("Log a past workout", Modifier.padding(bottom = 10.dp)) { picking = true }
+                if (state.settings.garminKey.isNotBlank()) AddButton("Import reps from Garmin", Modifier.padding(bottom = 16.dp), icon = Ico.Sync) { onGarmin() }
             }
             if (days.isEmpty()) item { Muted("No workouts logged yet. Sets you log on the Workout tab show up here.") }
             items(days, key = { it }) { d ->
@@ -265,4 +267,175 @@ private fun SessionEditor(date: String, onBack: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
     )
+}
+
+/** Pulls the sets and reps your watch counted in a Strength activity into the workout log. */
+@Composable
+fun GarminRepsScreen(onClose: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val state by Repo.state.collectAsStateWithLifecycle()
+    val plan = state.plan
+    val toast = LocalToast.current
+    var acts by remember { mutableStateOf<List<com.bulkplan.tracker.net.Garmin.StrengthActivity>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var picked by remember { mutableStateOf<com.bulkplan.tracker.net.Garmin.StrengthActivity?>(null) }
+    var sets by remember { mutableStateOf<List<com.bulkplan.tracker.net.Fit.FitSet>?>(null) }
+    var reload by remember { mutableStateOf(0) }
+    BackHandler { if (picked != null) { picked = null; sets = null } else onClose() }
+
+    androidx.compose.runtime.LaunchedEffect(reload) {
+        error = null
+        if (state.settings.garminKey.isBlank()) { error = "Add your Garmin Personal API key in Settings › Garmin first."; acts = emptyList(); return@LaunchedEffect }
+        try { acts = com.bulkplan.tracker.net.Garmin.strengthActivities(ctx) } catch (e: Exception) { error = e.message; acts = emptyList() }
+    }
+    androidx.compose.runtime.LaunchedEffect(picked) {
+        val a = picked ?: return@LaunchedEffect
+        sets = null; error = null
+        try { sets = com.bulkplan.tracker.net.Garmin.strengthSets(ctx, a.id) } catch (e: Exception) { error = e.message; picked = null }
+    }
+
+    Scaffold(
+        containerColor = C.Bg,
+        topBar = {
+            TopAppBar(
+                title = { Text(picked?.let { "Sets from ${PlanLogic.fmtD(it.date)}" } ?: "Reps from Garmin") },
+                navigationIcon = { IconButton(onClick = { if (picked != null) { picked = null; sets = null } else onClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = C.Bg),
+            )
+        },
+    ) { pad ->
+        val a = picked
+        val s = sets
+        if (a != null && s != null) {
+            Box(Modifier.fillMaxSize().padding(pad)) { SetAssigner(a, s, plan, onSaved = { d -> toast("Saved to ${PlanLogic.fmtD(d)}. Fix anything in History."); onClose() }) }
+            return@Scaffold
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp)) {
+            item {
+                Section("How to record reps", icon = Ico.Barbell) {
+                    Muted("On the watch: start a Strength activity with rep counting on, do your set, then press the button to end the set and start the rest timer. Sync to Garmin Connect when you’re done, then pick the workout below.")
+                    Muted("Garmin says leg exercises may not be counted, so you may need to type those reps in. Add the weights here too, since the watch doesn’t know them unless you enter them on it.")
+                }
+            }
+            error?.let { item { Text(it, color = C.Red, fontSize = 15.sp, modifier = Modifier.padding(bottom = 12.dp)) } }
+            val list = acts
+            if (list == null || (picked != null && sets == null)) item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp)); Muted(if (picked != null) "Downloading the workout…" else "Looking for strength workouts…")
+                }
+            } else {
+                if (list.isEmpty() && error == null) item { Muted("No Strength activities in the last 3 weeks. Record one on the watch, sync it, then tap Refresh.") }
+                items(list, key = { it.id }) { act ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp)).background(C.Card)
+                            .border(1.dp, C.Line, RoundedCornerShape(16.dp)).clickable { picked = act }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Ico.Barbell, null, tint = androidx.compose.ui.graphics.Color.Unspecified, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(act.name, style = H3)
+                            Muted(PlanLogic.fmtD(act.date) + (act.time.takeIf { it.isNotBlank() }?.let { " · " + PlanLogic.fmtT(it) } ?: "") +
+                                (if (Repo.logs.value[act.date]?.sets?.isNotEmpty() == true) " · already has sets logged" else ""))
+                        }
+                        Icon(Ico.Right, null, tint = C.Muted, modifier = Modifier.size(20.dp))
+                    }
+                }
+                item { PillButton("Refresh", Ico.Sync) { acts = null; reload++ } }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun SetAssigner(act: com.bulkplan.tracker.net.Garmin.StrengthActivity, all: List<com.bulkplan.tracker.net.Fit.FitSet>, plan: Plan, onSaved: (String) -> Unit) {
+    val logs by Repo.logs.collectAsStateWithLifecycle()
+    val date = act.date
+    val sets = all.filter { it.active && (it.reps ?: 0) > 0 || it.active && it.reps == null && (it.durationS ?: 0.0) > 5 }
+    val dayLog = logs[date]
+    var wk by remember { mutableStateOf(dayLog?.workout ?: PlanLogic.workoutForDay(plan, PlanLogic.dow(date)) ?: plan.workouts.keys.firstOrNull() ?: "") }
+    val exercises = plan.workouts[wk]?.exercises.orEmpty()
+    val block = PlanLogic.blockFor(plan, maxOf(1, PlanLogic.weekOf(plan, date)))
+    val assigned = remember(wk) {
+        androidx.compose.runtime.mutableStateListOf<String?>().apply {
+            addAll(com.bulkplan.tracker.net.Fit.assign(sets, exercises.map { it.id to it.name }, exercises.map { PlanLogic.setsFor(plan, it, block) }))
+        }
+    }
+    val reps = remember { androidx.compose.runtime.mutableStateListOf<Double?>().apply { addAll(sets.map { it.reps?.toDouble() }) } }
+    val weights = remember(wk) {
+        val seen = HashMap<String, Int>()
+        androidx.compose.runtime.mutableStateListOf<Double?>().apply {
+            sets.forEachIndexed { i, s ->
+                val id = assigned.getOrNull(i)
+                val n = id?.let { seen.merge(it, 1, Int::plus)!! - 1 } ?: 0
+                add(
+                    id?.let { dayLog?.sets?.get(it)?.getOrNull(n)?.w }
+                        ?: id?.let { PlanLogic.lastSession(logs, it, date)?.second?.mapNotNull { e -> e.w }?.maxOrNull() }
+                        ?: s.weightKg?.let { Math.rint(it * 2.20462 / 2.5) * 2.5 }
+                )
+            }
+        }
+    }
+    var choosing by remember { mutableStateOf<Int?>(null) }
+    val names = exercises.associate { it.id to it.name }
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+        item {
+            Muted("${sets.size} set${if (sets.size == 1) "" else "s"} counted by your watch. Check which exercise each one was, add weights, then save.", Modifier.padding(bottom = 10.dp))
+            FlowRow(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                plan.workouts.forEach { (k, w) -> Chip(w.name, k == wk) { wk = k } }
+            }
+        }
+        items(sets.size) { i ->
+            val s = sets[i]
+            Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(16.dp)).background(C.Card).border(1.dp, C.Line, RoundedCornerShape(16.dp)).padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Set ${i + 1}", style = H3, modifier = Modifier.weight(1f))
+                    s.durationS?.let { d -> Muted("${(d / 60).toInt()}:${(d % 60).toInt().toString().padStart(2, '0')}") }
+                }
+                Spacer(Modifier.height(6.dp))
+                PillButton(assigned.getOrNull(i)?.let { names[it] } ?: "Skip this set", Ico.Dumbbell, selected = assigned.getOrNull(i) != null) { choosing = i }
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    NumField("lb", weights.getOrNull(i), "gw$wk$i", Modifier.weight(1f)) { v -> weights[i] = v }
+                    Spacer(Modifier.width(8.dp))
+                    NumField("reps", reps.getOrNull(i), "gr$i", Modifier.weight(1f)) { v -> reps[i] = v }
+                }
+            }
+        }
+        item {
+            val ready = assigned.count { it != null }
+            Button(enabled = ready > 0, modifier = Modifier.fillMaxWidth(), onClick = {
+                val grouped = LinkedHashMap<String, MutableList<SetEntry?>>()
+                sets.indices.forEach { i ->
+                    val id = assigned.getOrNull(i) ?: return@forEach
+                    grouped.getOrPut(id) { mutableListOf() } += SetEntry(weights.getOrNull(i), reps.getOrNull(i), true)
+                }
+                Repo.updateLog(date) { it.copy(sets = it.sets + grouped, workout = wk) }
+                onSaved(date)
+            }) { Text("Save $ready set${if (ready == 1) "" else "s"} to ${PlanLogic.fmtD(date)}") }
+            Muted("Exercises you save here replace what was logged for them that day; other exercises stay.", Modifier.padding(top = 6.dp))
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+    choosing?.let { i ->
+        AlertDialog(
+            onDismissRequest = { choosing = null },
+            containerColor = C.Card,
+            title = { Text("Set ${i + 1} was…", color = C.Text) },
+            text = {
+                Column {
+                    exercises.forEach { e ->
+                        Text(e.name, color = if (assigned.getOrNull(i) == e.id) C.BlueSoft else C.Text, fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { assigned[i] = e.id; choosing = null }.padding(vertical = 10.dp))
+                    }
+                    Text("Skip this set", color = C.Muted, fontSize = 16.sp, modifier = Modifier.fillMaxWidth().clickable { assigned[i] = null; choosing = null }.padding(vertical = 10.dp))
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { choosing = null }) { Text("Cancel") } },
+        )
+    }
 }

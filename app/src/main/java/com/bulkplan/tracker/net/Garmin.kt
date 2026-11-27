@@ -115,6 +115,44 @@ object Garmin {
         return status
     }
 
+    data class StrengthActivity(val id: Long, val name: String, val date: String, val time: String)
+
+    /** Recent strength workouts recorded on the watch, newest first. */
+    suspend fun strengthActivities(ctx: Context, days: Int = 21): List<StrengthActivity> {
+        val key = Repo.state.value.settings.garminKey
+        if (key.isBlank()) throw Exception("Add your Garmin Personal API key in Settings first.")
+        val e = PlanLogic.today(); val s = PlanLogic.addD(e, -(days - 1).toLong())
+        val text = try { get(ctx, key, "/activitylist-service/activities/search/activities?start=0&limit=50&startDate=$s&endDate=$e") }
+        catch (ex: HttpError) { throw Exception("Couldn’t load your Garmin activities (HTTP ${ex.code}).") }
+        return parseActivities(text)
+    }
+
+    internal fun parseActivities(text: String): List<StrengthActivity> {
+        val root = Repo.json.parseToJsonElement(text)
+        val arr = (root as? JsonArray) ?: (root as? JsonObject)?.values?.firstOrNull { it is JsonArray } as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val type = (o["activityType"] as? JsonObject)?.get("typeKey")?.jsonPrimitive?.contentOrNull
+                ?: (o["activityType"] as? JsonPrimitive)?.contentOrNull ?: ""
+            if (!type.contains("strength", true)) return@mapNotNull null
+            val id = o["activityId"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null
+            val start = o["startTimeLocal"]?.jsonPrimitive?.contentOrNull ?: ""
+            StrengthActivity(id, o["activityName"]?.jsonPrimitive?.contentOrNull ?: "Strength", start.take(10), start.drop(11).take(5))
+        }.sortedByDescending { it.date + it.time }
+    }
+
+    /** The sets your watch counted in one activity. */
+    suspend fun strengthSets(ctx: Context, activityId: Long): List<Fit.FitSet> {
+        val key = Repo.state.value.settings.garminKey
+        val path = "/download-service/files/activity/$activityId"
+        val bytes = try { Http.bytes(BASE + path, mapOf("Authorization" to "Bearer ${token(ctx, key)}")) }
+        catch (e: HttpError) {
+            if (e.code == 401) Http.bytes(BASE + path, mapOf("Authorization" to "Bearer ${token(ctx, key, force = true)}"))
+            else throw Exception("Couldn’t download that workout from Garmin (HTTP ${e.code}).")
+        }
+        return Fit.sets(bytes)
+    }
+
     /** Raw look at each endpoint, so field names can be checked if something doesn't fill in. */
     suspend fun diagnose(ctx: Context): String {
         val key = Repo.state.value.settings.garminKey

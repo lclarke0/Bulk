@@ -76,6 +76,7 @@ import com.bulkplan.tracker.ui.SettingsScreen
 import com.bulkplan.tracker.ui.ScheduleScreen
 import com.bulkplan.tracker.ui.ChatScreen
 import com.bulkplan.tracker.ui.WorkoutHistoryScreen
+import com.bulkplan.tracker.ui.GarminRepsScreen
 import com.bulkplan.tracker.ui.IntakeScreen
 import com.bulkplan.tracker.ui.ImportPlanScreen
 import com.bulkplan.tracker.ui.TodayScreen
@@ -136,7 +137,7 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
     CompositionLocalProvider(LocalToast provides toast) {
         val open: (String) -> Unit = { k ->
             when (k) {
-                "settings", "schedule", "chat", "history" -> overlay = k
+                "settings", "schedule", "chat", "history", "garmin-reps" -> overlay = k
                 "intake", "intake-end" -> { intakeAtEnd = k == "intake-end"; overlay = "intake" }
                 "import" -> { importText = ""; overlay = "import" }
                 else -> { tab = k; overlay = null }
@@ -150,7 +151,8 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
             "settings" -> { SettingsScreen(onClose = { overlay = null }, onOpen = open); return@CompositionLocalProvider }
             "schedule" -> { ScheduleScreen(onClose = { overlay = null }); return@CompositionLocalProvider }
             "chat" -> { ChatScreen(onClose = { overlay = null }, onOpenSettings = { overlay = "settings" }); return@CompositionLocalProvider }
-            "history" -> { WorkoutHistoryScreen(onClose = { overlay = null }); return@CompositionLocalProvider }
+            "history" -> { WorkoutHistoryScreen(onClose = { overlay = null }, onGarmin = { overlay = "garmin-reps" }); return@CompositionLocalProvider }
+            "garmin-reps" -> { GarminRepsScreen(onClose = { overlay = null }); return@CompositionLocalProvider }
             "intake" -> { IntakeScreen(startAtEnd = intakeAtEnd, onClose = { overlay = null }, onImport = { importText = it; overlay = "import" }); return@CompositionLocalProvider }
             "import" -> { ImportPlanScreen(importText, onClose = { overlay = null }); return@CompositionLocalProvider }
         }
@@ -171,7 +173,7 @@ fun App(requestedTab: String?, consumed: () -> Unit) {
                 when (tab) {
                     "today" -> TodayScreen(onGo = open, onEditSchedule = { overlay = "schedule" })
                     "food" -> FoodScreen()
-                    "workout" -> WorkoutScreen(onHistory = { overlay = "history" })
+                    "workout" -> WorkoutScreen(onHistory = { overlay = "history" }, onGarmin = { overlay = "garmin-reps" })
                     "progress" -> ProgressScreen()
                     "coach" -> CoachScreen(onOpenSettings = { overlay = "settings" }, onGo = open)
                 }

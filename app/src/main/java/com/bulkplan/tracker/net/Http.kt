@@ -39,4 +39,21 @@ object Http {
             c.disconnect()
         }
     }
+
+    /** GET that returns raw bytes, for file downloads. */
+    suspend fun bytes(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 60_000): ByteArray = withContext(Dispatchers.IO) {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 15_000
+            c.readTimeout = timeoutMs
+            c.setRequestProperty("User-Agent", UA)
+            c.setRequestProperty("Accept", "*/*")
+            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+            val code = c.responseCode
+            if (code !in 200..299) throw HttpError(code, c.errorStream?.bufferedReader()?.use { it.readText() } ?: "")
+            c.inputStream.use { it.readBytes() }
+        } finally {
+            c.disconnect()
+        }
+    }
 }

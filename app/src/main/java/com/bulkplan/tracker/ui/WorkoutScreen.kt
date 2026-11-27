@@ -87,7 +87,7 @@ private fun muscleColor(m: String): Color = when (m) {
 }
 
 @Composable
-fun WorkoutScreen(onHistory: () -> Unit = {}) {
+fun WorkoutScreen(onHistory: () -> Unit = {}, onGarmin: () -> Unit = {}) {
     val state by Repo.state.collectAsStateWithLifecycle()
     val logs by Repo.logs.collectAsStateWithLifecycle()
     val plan = state.plan
@@ -130,6 +130,7 @@ fun WorkoutScreen(onHistory: () -> Unit = {}) {
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Today’s session", style = H2, modifier = Modifier.weight(1f))
+                if (state.settings.garminKey.isNotBlank()) { PillButton("Watch reps", Ico.Sync, onClick = onGarmin); Spacer(Modifier.width(8.dp)) }
                 PillButton("History", Ico.Calendar, onClick = onHistory)
             }
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

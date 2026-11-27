@@ -231,4 +231,61 @@ Sure — here's your plan.
         assertTrue(sys.contains("PLAN (JSON)"))
         assertTrue(sys.contains("wt 176"))
     }
+
+    /** Builds a tiny FIT file with set messages the way a watch writes them. */
+    private fun fitWithSets(vararg sets: IntArray): ByteArray {
+        val body = java.io.ByteArrayOutputStream()
+        fun le(v: Long, n: Int) { for (i in 0 until n) body.write(((v shr (8 * i)) and 0xFF).toInt()) }
+        // file_id definition + data (local 0, global 0) so the reader skips unrelated messages.
+        body.write(0x40); body.write(0); body.write(0); le(0, 2); body.write(1); body.write(0); body.write(1); body.write(0x00)
+        body.write(0x00); body.write(4)
+        // set definition (local 1, global 225): duration u32, reps u16, weight u16, set_type u8, category u16[2]
+        body.write(0x41); body.write(0); body.write(0); le(225, 2); body.write(5)
+        intArrayOf(0, 4, 0x86, 3, 2, 0x84, 4, 2, 0x84, 5, 1, 0x02, 7, 4, 0x84).forEach { body.write(it) }
+        for (st in sets) {
+            body.write(0x01)
+            le(st[0].toLong() * 1000, 4); le(st[1].toLong(), 2); le(st[2].toLong(), 2); body.write(st[3]); le(st[4].toLong(), 2); le(0xFFFF, 2)
+        }
+        val data = body.toByteArray()
+        val out = java.io.ByteArrayOutputStream()
+        out.write(14); out.write(0x20); out.write(0x52); out.write(0x08)
+        for (i in 0 until 4) out.write(((data.size.toLong() shr (8 * i)) and 0xFF).toInt())
+        out.write(".FIT".toByteArray()); out.write(0); out.write(0)
+        out.write(data); out.write(0); out.write(0)
+        return out.toByteArray()
+    }
+
+    @Test fun fitSetsDecodeFromFileAndZip() {
+        val fit = fitWithSets(
+            intArrayOf(40, 8, 0xFFFF, 1, 0),        // bench-category set, 8 reps, no weight
+            intArrayOf(90, 0xFFFF, 0xFFFF, 0, 0xFFFF), // rest
+            intArrayOf(35, 6, 100 * 16, 1, 0xFFFF),  // 6 reps, 100 kg
+        )
+        val sets = com.bulkplan.tracker.net.Fit.sets(fit)
+        assertEquals(3, sets.size)
+        assertEquals(8, sets[0].reps); assertEquals(0, sets[0].category); assertNull(sets[0].weightKg); assertTrue(sets[0].active)
+        assertFalse(sets[1].active)
+        assertEquals(100.0, sets[2].weightKg!!, 0.01); assertEquals(35.0, sets[2].durationS!!, 0.01); assertNull(sets[2].category)
+        val zip = java.io.ByteArrayOutputStream().also { bo ->
+            java.util.zip.ZipOutputStream(bo).use { z -> z.putNextEntry(java.util.zip.ZipEntry("123_ACTIVITY.fit")); z.write(fit); z.closeEntry() }
+        }.toByteArray()
+        assertEquals(sets, com.bulkplan.tracker.net.Fit.sets(zip))
+    }
+
+    @Test fun watchSetsAreMatchedToExercises() {
+        val s = { reps: Int, cat: Int? -> com.bulkplan.tracker.net.Fit.FitSet(0, true, reps, null, 30.0, null, cat) }
+        val ex = listOf("bench" to "Barbell bench press", "cs-row" to "Chest-supported row", "curl" to "Incline dumbbell curl")
+        // No categories: fill in workout order by planned sets (2 each).
+        assertEquals(listOf("bench", "bench", "cs-row", "cs-row", "curl", null),
+            com.bulkplan.tracker.net.Fit.assign(List(6) { s(8, null) }, ex, listOf(2, 2, 1)))
+        // A row category (23) jumps straight to the row.
+        assertEquals(listOf("cs-row", "bench"), com.bulkplan.tracker.net.Fit.assign(listOf(s(8, 23), s(8, null)), ex, listOf(2, 2, 1)))
+    }
+
+    @Test fun garminActivityListKeepsStrengthOnly() {
+        val json = """[{"activityId":11,"activityName":"Running","startTimeLocal":"2026-11-25 07:00:00","activityType":{"typeKey":"running"}},
+            {"activityId":12,"activityName":"Strength","startTimeLocal":"2026-11-25 17:31:05","activityType":{"typeKey":"strength_training"}}]"""
+        val acts = Garmin.parseActivities(json)
+        assertEquals(1, acts.size); assertEquals(12L, acts[0].id); assertEquals("2026-11-25", acts[0].date); assertEquals("17:31", acts[0].time)
+    }
 }
